@@ -215,7 +215,6 @@ ckip/
     ├── requirements.md               # Personas, user stories, acceptance criteria
     ├── architecture.md               # System design and technical decisions
     ├── api-reference.md              # Complete API endpoint reference
-    ├── demo-script.md                # Walkthrough script for demonstrations
     └── adr-payments-center-brain.md  # ADR: Payments Center Brain (future)
 ```
 
