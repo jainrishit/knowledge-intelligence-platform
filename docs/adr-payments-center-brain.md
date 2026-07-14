@@ -1,7 +1,6 @@
 # ADR: Payments Center Brain
 
-**Status:** Proposed — not implemented  
-**Deciders:** Knowledge Intelligence Platform team  
+**Status:** not implemented   
 
 ---
 
