@@ -1,0 +1,1 @@
+"""Make generation a package."""
