@@ -1,7 +1,6 @@
 # ADR: Payments Center Brain
 
 **Status:** Proposed — not implemented  
-**Date:** 2025  
 **Deciders:** Knowledge Intelligence Platform team  
 
 ---
