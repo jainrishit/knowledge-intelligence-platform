@@ -25,12 +25,45 @@ The Knowledge Intelligence Platform compiles your consulting content into a stru
 
 | What you upload | What the platform builds |
 |---|---|
-| PDFs, DOCX, PPTX files | **Concepts** — named, typed, with verbatim source excerpts |
+| PDFs, DOCX, PPTX, XLSX, XLS, CSV files | **Concepts** — named, typed, with verbatim source excerpts |
 | Documents across a domain | **Relationships** — how concepts connect across documents |
 | A body of work | **Consulting Patterns** — recurring approaches to recurring problems |
 | All of the above | **Knowledge Graph** — an interactive, explorable intelligence layer |
 | Questions | **Evidence-grounded answers** — every claim traced to a source document |
 | A topic + audience | **Client-ready deliverables** — POVs, executive summaries, roadmaps |
+
+---
+
+## LLM Governance
+
+Every LLM call passes through a governance pipeline before reaching the provider:
+
+| Layer | What it does |
+|---|---|
+| **Secret Provider** | API key fetched via `SecretProvider` abstraction — never directly from `os.environ` in business logic. Swap to `AWSSecretsManagerProvider` for production with zero code changes |
+| **Circuit Breaker** | Opens after 5 consecutive failures; auto-recovers after 60s. Rejects all calls while open (HTTP 503) to prevent cascade failures |
+| **Rate Limiter** | Per-workspace sliding-window counter — default 60 requests/min. Returns HTTP 429 when exceeded |
+| **Budget Check** | Per-workspace monthly token and cost limits enforced before each call. Returns HTTP 429 when exceeded |
+| **Usage Tracker** | Every call writes one `LLMUsage` row with token counts and estimated cost. Running totals accumulated in `LLMBudget` |
+| **Observability** | Structured log lines include workspace ID, operation, latency, token counts, and cost estimate. API keys, prompts, and credentials are never logged |
+
+Admin visibility: `GET /admin/llm/usage` and `GET /admin/llm/budgets` return usage aggregates and budget status.
+
+---
+
+## Upload Security
+
+Every uploaded file passes through a three-stage validation pipeline before it touches the filesystem or a parser:
+
+| Stage | What is checked | How |
+|---|---|---|
+| **Magic-byte detection** | Actual file format — not the filename or `Content-Type` header | `filetype` library reads the binary signature from the first 8 KB |
+| **Allow-list enforcement** | Only PDF, DOCX, PPTX, XLSX, XLS, CSV are accepted | Any other detected MIME type returns HTTP 422 |
+| **Size limit** | Default 25 MB per file, configurable via `MAX_UPLOAD_BYTES` | Streamed check — oversized files return HTTP 413 before being fully buffered |
+
+**Why magic bytes instead of extensions?** A file named `malware.pdf` with a ZIP or executable binary inside will pass an extension check but fail the magic-byte check. Attackers control the filename and `Content-Type` header; they do not control the binary content signature. CSV files carry no binary signature and are identified by file extension instead.
+
+All parsers (PyMuPDF, python-docx, python-pptx, openpyxl, xlrd) are wrapped with defensive exception handling. A corrupt or malformed file marks the document as `failed` with a clean error message — no stack traces are ever exposed to the client.
 
 ---
 
@@ -40,7 +73,7 @@ The Knowledge Intelligence Platform compiles your consulting content into a stru
 Isolated knowledge domains. Each workspace contains its own documents, concepts, relationships, and patterns. No cross-workspace knowledge leakage.
 
 ### Document Processing
-Upload PDF, DOCX, or PPTX files. The platform automatically runs a four-stage compilation pipeline: text extraction → concept detection → relationship mapping → pattern recognition. No manual tagging required.
+Upload PDF, DOCX, PPTX, XLSX, XLS, or CSV files. The platform automatically runs a compilation pipeline: text extraction → concept detection → relationship mapping → pattern recognition. Spreadsheet files are processed with structure-aware parsing that preserves sheet types, table structures, and column roles before extraction. No manual tagging required.
 
 ### Knowledge Extraction
 Three chained extraction agents compile documents into the knowledge graph:
@@ -97,7 +130,7 @@ Generate client-ready consulting documents (Point of View, Executive Summary, Ro
 | Database | SQLite (development) → PostgreSQL (production, same ORM) |
 | Graph engine | NetworkX (development) → Amazon Neptune / Neo4j (production) |
 | LLM | Claude via IBM Consulting Advantage endpoint |
-| Document parsing | PyMuPDF (PDF), python-docx (DOCX), python-pptx (PPTX) |
+| Document parsing | PyMuPDF (PDF), python-docx (DOCX), python-pptx (PPTX), openpyxl (XLSX), xlrd (XLS), csv (CSV) |
 
 ---
 
@@ -167,20 +200,39 @@ ckip/
 │   │   ├── main.py                   # FastAPI entrypoint
 │   │   ├── config.py                 # All settings via environment variables
 │   │   ├── schemas.py                # Pydantic models — API I/O and grounding enforcement
-│   │   ├── llm.py                    # LLM client (ICA Claude endpoint)
+│   │   ├── llm_client.py             # LLM client (ICA Claude endpoint)
 │   │   ├── db/
 │   │   │   ├── models.py             # SQLAlchemy ORM models
 │   │   │   └── session.py            # Session factory, init_db()
+│   │   ├── core/
+│   │   │   └── upload_validation.py  # Magic-byte detection, size limit, MIME allow-list
+│   │   ├── security/
+│   │   │   └── secrets.py            # SecretProvider abstraction layer
+│   │   ├── llm/
+│   │   │   ├── circuit_breaker.py    # CLOSED/OPEN/HALF_OPEN circuit breaker
+│   │   │   ├── retry.py              # Tenacity retry policy with transient-error predicate
+│   │   │   ├── governance.py         # Budget enforcement + rate limiting
+│   │   │   └── usage_tracker.py      # Token/cost recording per API call
 │   │   ├── ingestion/
 │   │   │   ├── parsers.py            # PDF/DOCX/PPTX → raw text + metadata
-│   │   │   └── pipeline.py           # Orchestration: parse → extract → graph
+│   │   │   ├── pipeline.py           # Orchestration: parse → extract → graph (routes by file type)
+│   │   │   └── spreadsheets/
+│   │   │       ├── excel_parser.py       # openpyxl (.xlsx) + xlrd (.xls) → WorkbookData
+│   │   │       ├── csv_parser.py         # CSV with delimiter sniffing + BOM handling
+│   │   │       ├── sheet_analyzer.py     # Heuristic sheet-type classification + domain detection
+│   │   │       ├── table_detector.py     # DetectedTable builder + text rendering for LLM
+│   │   │       ├── schema_extractor.py   # Structural schema extraction (column roles, entity types)
+│   │   │       └── spreadsheet_processor.py  # Top-level orchestrator for the spreadsheet path
 │   │   ├── extraction/
-│   │   │   ├── concept_agent.py      # Concept extraction with confidence scoring
-│   │   │   ├── relationship_agent.py # Relationship discovery with strength scoring
-│   │   │   └── pattern_agent.py      # Consulting pattern recognition
+│   │   │   ├── concept_agent.py           # Concept extraction (text documents)
+│   │   │   ├── spreadsheet_concept_agent.py # Concept extraction (spreadsheets, table-aware)
+│   │   │   ├── relationship_agent.py      # Relationship discovery with strength scoring
+│   │   │   └── pattern_agent.py           # Consulting pattern recognition
 │   │   ├── graph/
-│   │   │   ├── builder.py            # NetworkX graph from SQL (derived layer)
-│   │   │   └── traversal.py          # Semantic node search + strength-filtered BFS
+│   │   │   ├── builder.py            # NetworkX graph builder from SQL (derived layer)
+│   │   │   ├── traversal.py          # Semantic node search + strength-filtered BFS
+│   │   │   ├── store.py              # Thread-safe in-process graph cache
+│   │   │   └── memory_manager.py     # Singleton: incremental add/remove, startup load
 │   │   ├── retrieval/
 │   │   │   └── qa_service.py         # Evidence-grounded Q&A pipeline
 │   │   ├── generation/
@@ -190,15 +242,21 @@ ckip/
 │   │       ├── documents.py
 │   │       ├── graph.py
 │   │       ├── assistant.py
-│   │       └── deliverables.py
+│   │       ├── deliverables.py
+│   │       └── admin.py              # LLM usage, budget, and spreadsheet run metrics
 │   ├── tests/
 │   │   ├── test_api.py               # Integration tests — every route and error path
 │   │   ├── test_graph.py             # Graph builder + traversal unit tests
+│   │   ├── test_graph_memory.py      # Graph memory manager + pattern evolution tests
+│   │   ├── test_llm_governance.py    # Secrets, budget, circuit breaker, rate limiter
+│   │   ├── test_llm_resilience.py    # Retry policy, timeout, and circuit breaker integration
 │   │   ├── test_parsers.py           # PDF/DOCX/PPTX extraction tests
 │   │   ├── test_pipeline.py          # Full ingestion pipeline tests
 │   │   ├── test_retrieval_consistency.py # Retrieval determinism and scoring tests
 │   │   ├── test_schemas.py           # Pydantic validation and grounding rule tests
-│   │   └── test_stress.py            # Concurrency and large-workspace tests
+│   │   ├── test_spreadsheet.py       # Spreadsheet pipeline unit + integration tests
+│   │   ├── test_stress.py            # Concurrency and large-workspace tests
+│   │   └── test_upload_security.py   # File size, magic-byte, and spoofing tests
 │   ├── .env.example                  # Environment variable template
 │   └── requirements.txt
 ├── frontend/
@@ -206,7 +264,7 @@ ckip/
 │       ├── pages/
 │       │   ├── WorkspaceList.tsx     # Workspace grid + create
 │       │   ├── DocumentUpload.tsx    # Drag-and-drop + status polling
-│       │   ├── GraphExplorer.tsx     # React Flow canvas + node side panel
+│       │   ├── GraphExplorer.tsx     # React Flow canvas + node side panel + type filters
 │       │   ├── AssistantChat.tsx     # Chat UI with source citations
 │       │   └── DeliverableGenerator.tsx # Generate + edit + export
 │       ├── api/client.ts             # Typed API client (proxied to :8000)
@@ -224,18 +282,32 @@ ckip/
 
 | Variable | Default | Description |
 |---|---|---|
-| `CLAUDE_API_KEY` | — | **Required.** ICA API key |
+| `CLAUDE_API_KEY` | — | Raw API key. Local dev only — leave blank in production |
+| `CLAUDE_SECRET_NAME` | `CLAUDE_API_KEY` | Secret name resolved by `SecretProvider` at runtime |
 | `CLAUDE_BASE_URL` | `https://api.nextgen-beta.ica.ibm.com/ica` | ICA Claude endpoint |
 | `CLAUDE_MODEL` | `claude-sonnet-4-5` | Claude model version |
-| `DATABASE_URL` | `sqlite:///./bob_knowledge_fabric.db` | SQLAlchemy DB URL |
+| `DATABASE_URL` | `sqlite:///./knowledge_platform.db` | SQLAlchemy DB URL |
 | `UPLOAD_DIR` | `./uploads` | Local file storage path |
+| `MAX_UPLOAD_BYTES` | `26214400` | Maximum upload size per file (default 25 MB) |
 | `CHUNK_SIZE` | `3000` | Max characters per extraction chunk |
 | `CHUNK_OVERLAP` | `200` | Character overlap between adjacent chunks |
 | `GRAPH_HOP_DEPTH` | `2` | N-hop depth for graph traversal |
 | `GRAPH_STRENGTH_THRESHOLD` | `0.5` | Minimum edge strength to follow in BFS |
 | `GRAPH_MAX_NODES` | `60` | Max nodes expanded per traversal |
 | `CONCEPT_CONFIDENCE_MIN` | `0.6` | Minimum concept confidence score to persist |
+| `PATTERN_EXTRACTION_THRESHOLD_PERCENT` | `10` | Minimum % growth in concepts or relationships to trigger pattern re-extraction |
 | `QA_TOP_K` | `20` | Seed nodes retrieved per Q&A query |
+| `LLM_CB_FAILURE_THRESHOLD` | `5` | Consecutive failures before circuit breaker opens |
+| `LLM_CB_RECOVERY_TIMEOUT` | `60` | Seconds before breaker transitions to half-open |
+| `MAX_LLM_REQUESTS_PER_MINUTE` | `60` | Per-workspace LLM request rate limit |
+| `LLM_RATE_WINDOW_SECONDS` | `60` | Sliding window duration for rate limiting |
+| `LLM_COST_PER_1K_INPUT_TOKENS` | `0.003` | USD cost per 1 000 input tokens |
+| `LLM_COST_PER_1K_OUTPUT_TOKENS` | `0.015` | USD cost per 1 000 output tokens |
+| `LLM_CONNECT_TIMEOUT` | `10` | Seconds to wait for TCP connection + TLS handshake |
+| `LLM_READ_TIMEOUT` | `120` | Seconds to wait for the first response byte from the LLM |
+| `LLM_WRITE_TIMEOUT` | `30` | Seconds to wait while uploading the request body |
+| `LLM_MAX_RETRIES` | `4` | Retry attempts after the initial call (5 total) |
+| `LLM_RETRY_MAX_WAIT` | `30` | Backoff ceiling in seconds (exponential + jitter) |
 | `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed CORS origins |
 
 ---

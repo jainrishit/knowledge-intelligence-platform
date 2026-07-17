@@ -1,1 +1,1 @@
-"""Make retrieval a package."""
+"""Retrieval — evidence-grounded Q&A pipeline backed by the workspace knowledge graph."""

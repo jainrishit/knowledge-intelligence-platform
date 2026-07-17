@@ -1,5 +1,3 @@
-// API types — mirrors backend Pydantic schemas
-
 export interface Workspace {
   id: number;
   name: string;
@@ -7,6 +5,10 @@ export interface Workspace {
   created_at: string;
   document_count: number;
   concept_count: number;
+  relationship_count: number;
+  pattern_count: number;
+  graph_version: number;
+  graph_last_updated: string | null;
 }
 
 export interface Document {
@@ -54,7 +56,6 @@ export interface ConsultingPattern {
   created_at: string;
 }
 
-// React Flow graph types
 export interface GraphNodeData {
   label: string;
   type: string;
@@ -119,10 +120,7 @@ export interface Deliverable {
   created_at: string;
 }
 
-export interface DeliverableResponse {
-  deliverable: Deliverable;
-  sources: SourceRef[];
-}
+export type DeliverableType = 'client_101' | 'client_201' | 'executive_summary';
 
 export interface NodeNeighbourhood {
   node: Concept;

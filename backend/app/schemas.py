@@ -10,7 +10,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-# ── Shared Evidence / Source ────────────────────────────────────────
+
 
 class SourceRef(BaseModel):
     document_id: int
@@ -32,7 +32,7 @@ class SourcedResponseMixin(BaseModel):
         return self
 
 
-# ── Workspace ────────────────────────────────────────────────────────
+
 
 class WorkspaceCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
@@ -48,9 +48,13 @@ class WorkspaceOut(BaseModel):
     created_at: datetime
     document_count: int = 0
     concept_count: int = 0
+    relationship_count: int = 0
+    pattern_count: int = 0
+    graph_version: int = 0
+    graph_last_updated: Optional[datetime] = None
 
 
-# ── Document ─────────────────────────────────────────────────────────
+
 
 class DocumentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -71,7 +75,7 @@ class DocumentDetail(DocumentOut):
     raw_text: Optional[str] = None
 
 
-# ── Concept ──────────────────────────────────────────────────────────
+
 
 class ConceptOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -86,7 +90,7 @@ class ConceptOut(BaseModel):
     created_at: datetime
 
 
-# ── Relationship ─────────────────────────────────────────────────────
+
 
 class RelationshipOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -100,7 +104,7 @@ class RelationshipOut(BaseModel):
     created_at: datetime
 
 
-# ── Pattern ──────────────────────────────────────────────────────────
+
 
 class ConsultingPatternOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -115,7 +119,7 @@ class ConsultingPatternOut(BaseModel):
     created_at: datetime
 
 
-# ── Graph ────────────────────────────────────────────────────────────
+
 
 class GraphNode(BaseModel):
     id: str  # React Flow expects string IDs
@@ -144,7 +148,7 @@ class NodeNeighbourhood(BaseModel):
     source_document: Optional[DocumentOut] = None
 
 
-# ── Assistant / Chat ─────────────────────────────────────────────────
+
 
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1)
@@ -166,16 +170,12 @@ class ChatMessageOut(BaseModel):
     created_at: datetime
 
 
-# ── Deliverables ─────────────────────────────────────────────────────
+
 
 class DeliverableCreate(BaseModel):
-    type: str = Field(..., pattern="^(POV|executive_summary|roadmap)$")
-    topic: Optional[str] = None
-    audience: Optional[str] = None
-
-
-class DeliverableUpdate(BaseModel):
-    content_markdown: str
+    type: str = Field(..., pattern="^(client_101|client_201|executive_summary)$")
+    # focus_area is only meaningful for executive_summary; ignored for client_101/201
+    focus_area: Optional[str] = None
 
 
 class DeliverableOut(BaseModel):
@@ -191,6 +191,9 @@ class DeliverableOut(BaseModel):
     created_at: datetime
 
 
-class DeliverableResponse(SourcedResponseMixin):
+class DeliverablePptxResponse(SourcedResponseMixin):
     deliverable: DeliverableOut
     sources: list[SourceRef] = Field(default_factory=list)
+    # Raw PPTX bytes — not serialised to JSON; consumed directly by the API layer
+    pptx_bytes: bytes = Field(default=b"", exclude=True)
+    filename: str = ""

@@ -46,7 +46,7 @@
   h1, h2, h3, h4 { letter-spacing: -0.02em; }
 }
 
-/* ── Segmented control ──────────────────────────────────────────────── */
+/* Segmented control */
 .seg-group {
   display: inline-flex;
   border: 1px solid hsl(var(--border));
@@ -68,7 +68,7 @@
 .seg-btn:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
 .seg-btn.active { background: hsl(var(--foreground)); color: hsl(var(--background)); font-weight: 500; }
 
-/* ── Concept-type colour pills ──────────────────────────────────────── */
+/* Concept-type colour pills */
 .type-pill {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 8px;
@@ -88,7 +88,7 @@
 .type-Tool        { background: hsl(var(--c-tool)      / .12); color: hsl(var(--c-tool));        border-color: hsl(var(--c-tool)      / .25); }
 .type-General     { background: hsl(var(--c-general)   / .10); color: hsl(var(--c-general));     border-color: hsl(var(--c-general)   / .20); }
 
-/* ── Callout / explainer boxes ──────────────────────────────────────── */
+/* Callout boxes */
 .callout {
   border-left: 3px solid hsl(var(--primary));
   background: hsl(var(--primary) / .05);
@@ -106,7 +106,7 @@
   background: hsl(var(--c-pattern) / .06);
 }
 
-/* ── Step indicator ─────────────────────────────────────────────────── */
+/* Step indicator */
 .step-dot {
   width: 22px; height: 22px;
   border-radius: 50%;
@@ -118,7 +118,7 @@
 .step-dot-done    { background: hsl(var(--c-pattern) / .15); color: hsl(var(--c-pattern)); border: 1.5px solid hsl(var(--c-pattern) / .4); }
 .step-dot-pending { background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
 
-/* ── Markdown prose (deliverable preview) ──────────────────────────── */
+/* Markdown prose (deliverable preview) */
 .prose-preview { font-size: 13.5px; line-height: 1.75; color: hsl(var(--foreground)); }
 .prose-preview h1 { font-size: 18px; font-weight: 700; margin: 20px 0 8px; letter-spacing: -0.02em; }
 .prose-preview h2 { font-size: 15px; font-weight: 600; margin: 18px 0 6px; letter-spacing: -0.015em; border-bottom: 1px solid hsl(var(--border)); padding-bottom: 4px; }
@@ -130,7 +130,7 @@
 .prose-preview em { font-style: italic; color: hsl(var(--muted-foreground)); }
 .prose-preview blockquote { border-left: 3px solid hsl(var(--border)); padding-left: 12px; color: hsl(var(--muted-foreground)); margin: 10px 0; }
 
-/* ── React Flow overrides ───────────────────────────────────────────── */
+/* React Flow overrides */
 .react-flow__node {
   font-family: 'IBM Plex Sans', sans-serif;
   font-size: 12px;

@@ -1,65 +1,207 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '@/api/client';
-import type { Deliverable, DeliverableResponse } from '@/types/api';
-import { FileDown, Loader2, RefreshCw, Edit2, Eye, FileText } from 'lucide-react';
+import type { Deliverable, DeliverableType, Workspace } from '@/types/api';
+import {
+  FileDown, Loader2, RefreshCw,
+  Network, GitBranch, TrendingUp, Cpu, AlertCircle, Presentation, Trash2,
+} from 'lucide-react';
 
 type Tab = 'generate' | 'list';
-type DeliverableType = 'POV' | 'executive_summary' | 'roadmap';
 
-const TYPES: { id: DeliverableType; label: string; headline: string; desc: string; sections: string[] }[] = [
+interface TypeConfig {
+  id: DeliverableType;
+  label: string;
+  headline: string;
+  hasFocusArea: false | string;
+}
+
+const TYPES: TypeConfig[] = [
   {
-    id: 'POV',
-    label: 'Point of View',
-    headline: 'IBM\'s perspective on a topic',
-    desc: 'A concise 1–2 page document articulating IBM\'s stance, recommendation, and rationale. Best used to brief a client executive or open a conversation.',
-    sections: ['Executive Summary', 'Context', 'IBM Recommendation', 'Architecture Considerations', 'Roadmap', 'Risks'],
+    id: 'client_101',
+    label: 'Client 101',
+    headline: 'Full client briefing for a new team',
+    hasFocusArea: false,
+  },
+  {
+    id: 'client_201',
+    label: 'Client 201',
+    headline: 'Deep consulting analysis for engagement teams',
+    hasFocusArea: false,
   },
   {
     id: 'executive_summary',
     label: 'Executive Summary',
-    headline: 'High-level synthesis for leadership',
-    desc: 'A condensed overview of findings, insights, and recommended next steps. Designed for a C-suite reader who needs the essentials in under 5 minutes.',
-    sections: ['Summary', 'Key Findings', 'Recommended Actions', 'Supporting Evidence'],
-  },
-  {
-    id: 'roadmap',
-    label: 'Roadmap',
-    headline: 'Phased implementation plan',
-    desc: 'A structured, phase-by-phase plan showing how to move from current state to target state. Includes milestones, dependencies, and risks per phase.',
-    sections: ['Vision', 'Current State', 'Phase 1–3 Plan', 'Key Milestones', 'Risks & Mitigations'],
+    headline: 'Leadership briefing on a focused topic',
+    hasFocusArea: 'Area of focus (e.g. ISO 20022, Cross-Border Payments)',
   },
 ];
 
-function renderMarkdown(md: string): string {
-  return md
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>\n?)+/g, s => `<ul>${s}</ul>`)
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/^(?!<[hul])/gm, '')
-    .split('\n')
-    .map(line => line.startsWith('<') ? line : line ? `<p>${line}</p>` : '')
-    .join('\n');
+const TYPE_LABEL: Record<string, string> = {
+  client_101: 'Client 101',
+  client_201: 'Client 201',
+  executive_summary: 'Executive Summary',
+};
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
+
+function WorkspaceKnowledgeSummary({ ws }: { ws: Workspace | null }) {
+  if (!ws) return null;
+  const hasKnowledge = ws.concept_count > 0;
+
+  if (!hasKnowledge) {
+    return (
+      <div className="mb-6 flex items-start gap-3 px-4 py-3 border bg-amber-50 border-amber-200 text-xs">
+        <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="font-semibold text-amber-800">No knowledge compiled yet</p>
+          <p className="text-amber-700 mt-0.5">
+            Upload and process documents in the Documents tab first.
+            Client materials are generated exclusively from compiled knowledge.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-6 border bg-white">
+      <div className="px-4 py-2.5 border-b flex items-center gap-2">
+        <Cpu className="w-3.5 h-3.5 text-green-500" />
+        <span className="text-xs font-semibold text-green-700">Knowledge graph active</span>
+        <span className="text-[10px] text-muted-foreground ml-1">
+          v{ws.graph_version} · {ws.document_count} source {ws.document_count === 1 ? 'document' : 'documents'}
+        </span>
+        <span className="ml-auto text-[10px] text-muted-foreground">Presentation will draw from this compiled knowledge</span>
+      </div>
+      <div className="grid grid-cols-3 divide-x text-center">
+        <div className="px-4 py-3">
+          <p className="text-lg font-bold text-foreground tabular-nums">{ws.concept_count.toLocaleString()}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+            <Network className="w-3 h-3" /> concepts
+          </p>
+        </div>
+        <div className="px-4 py-3">
+          <p className="text-lg font-bold text-foreground tabular-nums">{ws.relationship_count}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+            <GitBranch className="w-3 h-3" /> relationships
+          </p>
+        </div>
+        <div className="px-4 py-3">
+          <p className="text-lg font-bold text-foreground tabular-nums">{ws.pattern_count}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center justify-center gap-1">
+            <TrendingUp className="w-3 h-3" /> patterns
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Saved Materials row component ────────────────────────────────────────────
+
+function DeliverableRow({
+  d,
+  onDeleted,
+}: {
+  d: Deliverable;
+  onDeleted: (id: number) => void;
+}) {
+  const [reExporting, setReExporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [rowError, setRowError] = useState('');
+
+  const handleReExport = async () => {
+    setReExporting(true);
+    setRowError('');
+    try {
+      const { blob, filename } = await api.deliverables.reExport(d.id);
+      triggerDownload(blob, filename);
+    } catch (err: unknown) {
+      setRowError(err instanceof Error ? err.message : 'Export failed.');
+    } finally {
+      setReExporting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setRowError('');
+    try {
+      await api.deliverables.delete(d.id);
+      onDeleted(d.id);
+    } catch (err: unknown) {
+      setRowError(err instanceof Error ? err.message : 'Delete failed.');
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="bg-white px-5 py-4 space-y-2">
+      <div className="flex items-center gap-4">
+        <div className="flex-shrink-0">
+          <span className="type-pill type-General">
+            {TYPE_LABEL[d.type] ?? d.type.replace(/_/g, ' ')}
+          </span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-sm text-foreground truncate">{d.title}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {new Date(d.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {d.source_document_ids.length > 0 && ` · ${d.source_document_ids.length} source${d.source_document_ids.length > 1 ? 's' : ''}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={handleReExport}
+            disabled={reExporting}
+            className="flex items-center gap-1 text-xs border px-2.5 py-1.5 hover:bg-muted transition-colors disabled:opacity-40"
+          >
+            {reExporting
+              ? <><Loader2 className="w-3 h-3 animate-spin" /> Generating…</>
+              : <><FileDown className="w-3 h-3" /> Re-export .pptx</>
+            }
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="flex items-center gap-1 text-xs border px-2.5 py-1.5 hover:bg-muted transition-colors disabled:opacity-40"
+          >
+            {deleting
+              ? <Loader2 className="w-3 h-3 animate-spin" />
+              : <><Trash2 className="w-3 h-3" /> Delete</>
+            }
+          </button>
+        </div>
+      </div>
+      {rowError && (
+        <p className="text-xs text-muted-foreground pl-1">{rowError}</p>
+      )}
+    </div>
+  );
+}
+
+// ── Main page ────────────────────────────────────────────────────────────────
 
 export default function DeliverableGenerator() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const wsId = Number(workspaceId);
+
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [tab, setTab] = useState<Tab>('generate');
-  const [delivType, setDelivType] = useState<DeliverableType>('POV');
-  const [topic, setTopic] = useState('');
-  const [audience, setAudience] = useState('CIO');
+  const [delivType, setDelivType] = useState<DeliverableType>('client_101');
+  const [focusArea, setFocusArea] = useState('');
   const [generating, setGenerating] = useState(false);
-  const [result, setResult] = useState<DeliverableResponse | null>(null);
-  const [editContent, setEditContent] = useState('');
-  const [previewMode, setPreviewMode] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [downloadReady, setDownloadReady] = useState<{ url: string; filename: string; title: string; sourceCount: number } | null>(null);
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [error, setError] = useState('');
@@ -70,28 +212,21 @@ export default function DeliverableGenerator() {
     e.preventDefault();
     setGenerating(true);
     setError('');
-    setResult(null);
+    if (downloadReady?.url) URL.revokeObjectURL(downloadReady.url);
+    setDownloadReady(null);
+
     try {
-      const resp = await api.deliverables.create(wsId, delivType, topic || undefined, audience || undefined);
-      setResult(resp);
-      setEditContent(resp.deliverable.content_markdown || '');
-      setPreviewMode(true);
+      const result = await api.deliverables.create(
+        wsId,
+        delivType,
+        delivType === 'executive_summary' && focusArea.trim() ? focusArea.trim() : undefined,
+      );
+      const url = URL.createObjectURL(result.blob);
+      setDownloadReady({ url, filename: result.filename, title: result.title, sourceCount: result.sourceCount });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Generation failed.');
     } finally {
       setGenerating(false);
-    }
-  };
-
-  const save = async () => {
-    if (!result) return;
-    setSaving(true);
-    try {
-      await api.deliverables.update(result.deliverable.id, editContent);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -101,17 +236,25 @@ export default function DeliverableGenerator() {
   };
 
   useEffect(() => {
+    api.workspaces.get(wsId).then(setWorkspace).catch(() => null);
+  }, [wsId]);
+
+  useEffect(() => {
     if (tab === 'list') loadList();
   }, [tab]);
+
+  useEffect(() => {
+    return () => { if (downloadReady?.url) URL.revokeObjectURL(downloadReady.url); };
+  }, [downloadReady]);
 
   return (
     <main className="max-w-4xl mx-auto px-8 py-10">
 
       <div className="mb-7 pb-6 border-b">
-        <h1 className="text-2xl font-semibold text-foreground">Deliverable Generator</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Client Material Generator</h1>
         <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
-          Generate client-ready consulting documents directly from this workspace's compiled knowledge.
-          Every section is grounded in your source documents. No fabricated content.
+          Generate first-draft client presentations directly from this workspace's knowledge graph.
+          Output is a PowerPoint file (.pptx) grounded entirely in your source documents.
         </p>
       </div>
 
@@ -119,10 +262,12 @@ export default function DeliverableGenerator() {
         <button className={`seg-btn${tab === 'generate' ? ' active' : ''}`} onClick={() => setTab('generate')}>
           Generate new
         </button>
-        <button className={`seg-btn${tab === 'list' ? ' active' : ''}`} onClick={() => setTab('list')}>
-          Saved deliverables
+        <button className={`seg-btn${tab === 'list' ? ' active' : ''}`} onClick={() => { setTab('list'); }}>
+          Saved materials
         </button>
       </div>
+
+      <WorkspaceKnowledgeSummary ws={workspace} />
 
       {tab === 'generate' && (
         <div className="space-y-8">
@@ -130,14 +275,14 @@ export default function DeliverableGenerator() {
 
             <div>
               <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                Document type
+                Material type
               </label>
               <div className="grid grid-cols-3 gap-3">
                 {TYPES.map(t => (
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => setDelivType(t.id)}
+                    onClick={() => { setDelivType(t.id); setFocusArea(''); }}
                     className={`text-left p-3.5 border transition-colors ${
                       delivType === t.id
                         ? 'border-foreground bg-foreground/[0.03]'
@@ -151,56 +296,34 @@ export default function DeliverableGenerator() {
                   </button>
                 ))}
               </div>
-
-              {/* Type explainer */}
-              <div className="callout callout-green mt-3 text-xs">
-                <p className="font-medium text-foreground mb-1">{selectedType.label}: what's included</p>
-                <p className="text-muted-foreground mb-2">{selectedType.desc}</p>
-                <div className="flex flex-wrap gap-1.5 mt-1">
-                  {selectedType.sections.map(s => (
-                    <span key={s} className="bg-white border px-2 py-0.5 rounded text-[10px] text-foreground font-medium">
-                      {s}
-                    </span>
-                  ))}
-                </div>
-              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            {selectedType.hasFocusArea && (
               <div>
                 <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  Topic / focus area
+                  Area of focus
+                  <span className="normal-case font-normal ml-1 text-muted-foreground">(optional)</span>
                 </label>
                 <input
                   className="w-full border px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-foreground bg-white"
-                  placeholder="e.g. ISO 20022 Migration"
-                  value={topic}
-                  onChange={e => setTopic(e.target.value)}
+                  placeholder={typeof selectedType.hasFocusArea === 'string' ? selectedType.hasFocusArea : ''}
+                  value={focusArea}
+                  onChange={e => setFocusArea(e.target.value)}
                 />
-                <p className="text-[11px] text-muted-foreground mt-1">Leave blank to cover all workspace knowledge</p>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  The graph will be traversed from this topic outward. Leave blank to cover the most significant theme across the workspace.
+                </p>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  Target audience
-                </label>
-                <input
-                  className="w-full border px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-foreground bg-white"
-                  placeholder="e.g. CIO, CFO, Board"
-                  value={audience}
-                  onChange={e => setAudience(e.target.value)}
-                />
-                <p className="text-[11px] text-muted-foreground mt-1">Shapes the tone and depth of the document</p>
-              </div>
-            </div>
+            )}
 
             <div className="flex justify-end pt-1 border-t">
               <button
                 type="submit"
-                disabled={generating}
+                disabled={generating || (workspace?.concept_count ?? 0) === 0}
                 className="flex items-center gap-2 px-5 py-2.5 bg-foreground text-background text-sm font-medium disabled:opacity-40 hover:opacity-80 transition-opacity"
               >
                 {generating
-                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</>
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating presentation…</>
                   : <><RefreshCw className="w-4 h-4" /> Generate {selectedType.label}</>
                 }
               </button>
@@ -213,86 +336,34 @@ export default function DeliverableGenerator() {
             </div>
           )}
 
-          {result && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-foreground">{result.deliverable.title}</h2>
+          {downloadReady && (
+            <div className="border bg-white p-5 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 bg-foreground/[0.05] border flex items-center justify-center flex-shrink-0">
+                  <Presentation className="w-4 h-4 text-foreground" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate">{downloadReady.title}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {result.deliverable.type.replace('_', ' ')} &middot; {result.sources.length} source{result.sources.length !== 1 ? 's' : ''}
+                    PowerPoint presentation · {downloadReady.sourceCount} source{downloadReady.sourceCount !== 1 ? 's' : ''} referenced
                   </p>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setPreviewMode(v => !v)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 border text-xs font-medium hover:bg-muted transition-colors"
-                  >
-                    {previewMode ? <><Edit2 className="w-3.5 h-3.5" /> Edit</> : <><Eye className="w-3.5 h-3.5" /> Preview</>}
-                  </button>
-                  <button
-                    onClick={save}
-                    disabled={saving}
-                    className="px-3 py-1.5 border text-xs font-medium hover:bg-muted transition-colors"
-                  >
-                    {saving ? 'Saving...' : saved ? 'Saved ✓' : 'Save'}
-                  </button>
-                  <a
-                    href={api.deliverables.exportUrl(result.deliverable.id, 'md')}
-                    download
-                    className="flex items-center gap-1.5 px-3 py-1.5 border text-xs font-medium hover:bg-muted transition-colors"
-                  >
-                    <FileDown className="w-3.5 h-3.5" />
-                    .md
-                  </a>
-                  <a
-                    href={api.deliverables.exportUrl(result.deliverable.id, 'docx')}
-                    download
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-foreground text-background text-xs font-medium hover:opacity-80 transition-opacity"
-                  >
-                    <FileDown className="w-3.5 h-3.5" />
-                    .docx
-                  </a>
-                </div>
+                <a
+                  href={downloadReady.url}
+                  download={downloadReady.filename}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-foreground text-background text-xs font-medium hover:opacity-80 transition-opacity flex-shrink-0"
+                >
+                  <FileDown className="w-3.5 h-3.5" />
+                  Download .pptx
+                </a>
               </div>
-
-              {previewMode ? (
-                <div
-                  className="prose-preview border bg-white p-6 min-h-[400px] max-h-[600px] overflow-y-auto"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(editContent) }}
-                />
-              ) : (
-                <textarea
-                  className="w-full min-h-[400px] border p-4 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-foreground bg-white leading-relaxed resize-y"
-                  value={editContent}
-                  onChange={e => setEditContent(e.target.value)}
-                />
-              )}
-
-              {result.sources.length > 0 && (
-                <div className="border bg-white p-4">
-                  <div className="flex items-center gap-1.5 mb-3">
-                    <FileText className="w-3.5 h-3.5 text-muted-foreground" />
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      Source documents ({result.sources.length})
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    {result.sources.map((s, i) => (
-                      <div key={i} className="flex items-start gap-2.5 text-xs">
-                        <span className="w-4 h-4 rounded bg-muted flex items-center justify-center text-[9px] font-bold text-muted-foreground flex-shrink-0 mt-0.5">
-                          {i + 1}
-                        </span>
-                        <div>
-                          <p className="font-medium text-foreground">{s.document_name}</p>
-                          {s.excerpt && (
-                            <p className="text-muted-foreground italic mt-0.5 leading-relaxed">"{s.excerpt.slice(0, 150)}{s.excerpt.length > 150 ? '...' : ''}"</p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <div className="text-[11px] text-muted-foreground pt-3 border-t flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-amber-500" />
+                <span>
+                  First-draft presentation. Review all content before sharing with clients.
+                  Sources are consolidated in the final slide of the deck.
+                </span>
+              </div>
             </div>
           )}
         </div>
@@ -301,46 +372,21 @@ export default function DeliverableGenerator() {
       {tab === 'list' && (
         <div>
           {listLoading ? (
-            <div className="py-10 text-center text-sm text-muted-foreground">Loading...</div>
+            <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
           ) : deliverables.length === 0 ? (
             <div className="py-14 text-center">
-              <FileText className="w-8 h-8 mx-auto text-muted-foreground mb-3" />
-              <p className="text-sm font-semibold text-foreground mb-1">No deliverables yet</p>
-              <p className="text-xs text-muted-foreground">Switch to "Generate new" to create your first document.</p>
+              <Presentation className="w-8 h-8 mx-auto text-muted-foreground mb-3" />
+              <p className="text-sm font-semibold text-foreground mb-1">No client materials yet</p>
+              <p className="text-xs text-muted-foreground">Switch to "Generate new" to create your first presentation.</p>
             </div>
           ) : (
             <div className="border divide-y">
               {deliverables.map(d => (
-                <div key={d.id} className="bg-white px-5 py-4 flex items-center gap-4 hover:bg-muted/20 transition-colors">
-                  <div className="flex-shrink-0">
-                    <span className="type-pill type-General">
-                      {d.type.replace('_', ' ')}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm text-foreground truncate">{d.title}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {new Date(d.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      {d.source_document_ids.length > 0 && ` · ${d.source_document_ids.length} source${d.source_document_ids.length > 1 ? 's' : ''}`}
-                    </p>
-                  </div>
-                  <div className="flex gap-2 flex-shrink-0">
-                    <a
-                      href={api.deliverables.exportUrl(d.id, 'md')}
-                      download
-                      className="flex items-center gap-1 text-xs border px-2.5 py-1.5 hover:bg-muted transition-colors"
-                    >
-                      <FileDown className="w-3 h-3" /> .md
-                    </a>
-                    <a
-                      href={api.deliverables.exportUrl(d.id, 'docx')}
-                      download
-                      className="flex items-center gap-1 text-xs bg-foreground text-background px-2.5 py-1.5 hover:opacity-80 transition-opacity"
-                    >
-                      <FileDown className="w-3 h-3" /> .docx
-                    </a>
-                  </div>
-                </div>
+                <DeliverableRow
+                  key={d.id}
+                  d={d}
+                  onDeleted={id => setDeliverables(prev => prev.filter(x => x.id !== id))}
+                />
               ))}
             </div>
           )}

@@ -15,6 +15,7 @@ export default defineConfig({
       '/workspaces': 'http://localhost:8000',
       '/documents': 'http://localhost:8000',
       '/deliverables': 'http://localhost:8000',
+      '/admin': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
     },
   },

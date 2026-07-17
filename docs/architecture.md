@@ -1,12 +1,12 @@
-# Bob Knowledge Fabric — System Architecture
+# Knowledge Intelligence Platform — System Architecture
 
 ---
 
 ## 1. Vision & Positioning
 
-Bob Knowledge Fabric is an **AI-native knowledge compiler** for IBM Consulting.
+The Knowledge Intelligence Platform is an **evidence-grounded knowledge compiler** for IBM Consulting.
 It is not a chatbot, not a document search tool, and not a generic RAG pipeline.
-Bob transforms fragmented institutional knowledge — POVs, BRDs, case studies, playbooks, architecture documents — into a structured, connected, evidence-traceable knowledge layer.
+It transforms fragmented institutional knowledge — POVs, BRDs, case studies, playbooks, architecture documents — into a structured, connected, evidence-traceable knowledge layer.
 
 **The grounding rule is architectural, not just a prompt constraint:**
 Every compiled item (concept, relationship, pattern) carries a `source_document_id` and `source_excerpt` in the database.
@@ -21,16 +21,16 @@ Every AI-generated response (answer, comparison, deliverable) returns a structur
 │                    BROWSER  (React + TypeScript)                  │
 │                                                                  │
 │  Workspace List  │  Doc Upload  │  Graph Explorer                │
-│  Assistant Chat  │  Deliverable Generator + Compare              │
+│  Assistant Chat  │  Deliverable Generator                        │
 └────────────────────────┬─────────────────────────────────────────┘
                          │  HTTP/REST (JSON) — Vite proxy → :8000
                          ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│              BOB KNOWLEDGE FABRIC  —  FastAPI (Python)            │
+│          KNOWLEDGE INTELLIGENCE PLATFORM  —  FastAPI (Python)     │
 │                                                                  │
 │  ┌─────────────────┐  ┌──────────────────┐  ┌────────────────┐  │
 │  │  Document        │  │  Knowledge       │  │  Graph Engine  │  │
-│  │  Ingestion       │  │  Compiler (Bob)  │  │  NetworkX      │  │
+│  │  Ingestion       │  │  Compiler        │  │  NetworkX      │  │
 │  │  PyMuPDF         │  │  Concept Agent   │  │  builder.py    │  │
 │  │  python-docx     │  │  Relationship    │  │  traversal.py  │  │
 │  │  python-pptx     │  │  Agent           │  └───────┬────────┘  │
@@ -60,57 +60,67 @@ Every AI-generated response (answer, comparison, deliverable) returns a structur
 
 ## 3. Knowledge Compilation Pipeline
 
-Bob's extraction pipeline has three chained agents, each running after every document ingestion:
+The ingestion pipeline routes by file type. Spreadsheets (xlsx, xls, csv) take a structure-aware path; all other documents take the text-extraction path. Both paths converge at the graph update and pattern threshold check.
 
 ```
-Upload (PDF / DOCX / PPTX)
+Upload (PDF / DOCX / PPTX / XLSX / XLS / CSV)
         │
         ▼
-File-type detection → route to parser
+Magic-byte validation → file-type detection
   PDF  → PyMuPDF
   DOCX → python-docx
   PPTX → python-pptx
+  XLSX / XLS → openpyxl / xlrd
+  CSV  → csv.Sniffer (BOM-aware)
         │
         ▼
-Store Document row (status=processing, raw_text saved)
+        ├── Spreadsheet path (xlsx / xls / csv)
+        │       │
+        │       ▼
+        │   Parse workbook → SheetData[] → WorkbookData
+        │   Analyse sheets → SheetAnalysis[] (type classification, domain hints)
+        │   Detect tables  → DetectedTable[] (labelled, bounded)
+        │   Extract schema → WorkbookSchema (structural prior for LLM)
+        │   Per-table concept extraction (sheet-type-aware prompt)
+        │   → Insert Concept rows  (source_document_id, source_excerpt from row)
+        │   → Insert Relationship rows
+        │   → Record SpreadsheetIngestionRun audit row
+        │
+        └── Document path (pdf / docx / pptx)
+                │
+                ▼
+            Store raw_text on Document row
+            ┌── Agent 1: Concept Compiler ──────────────────────────┐
+            │  Chunked document text → LLM                          │
+            │  Extracts: {name, type, description, source_excerpt}   │
+            │  Pydantic validation, confidence filter               │
+            │  Insert Concept rows                                  │
+            └───────────────────────────────────────────────────────┘
+                │
+                ▼
+            ┌── Agent 2: Relationship Compiler ─────────────────────┐
+            │  Workspace concept list + document text → LLM         │
+            │  Fuzzy name resolution → Concept IDs                 │
+            │  Insert Relationship rows                             │
+            └───────────────────────────────────────────────────────┘
+        │
+        ▼  (both paths converge here)
+┌── Agent 3: Pattern Compiler (threshold-gated) ────────────────────┐
+│  Runs only when workspace knowledge grew ≥ PATTERN_EXTRACTION_    │
+│  THRESHOLD_PERCENT since the last run                             │
+│  Full workspace Concepts + Relationships → LLM                   │
+│  Upsert ConsultingPattern rows (by name within workspace)        │
+│  Record PatternExtractionRun audit row                           │
+└───────────────────────────────────────────────────────────────────┘
         │
         ▼
-┌── Agent 1: Concept Compiler ─────────────────────────────────┐
-│  Prompt Bob (Claude) with chunked document text              │
-│  Extracts: {name, type, description, source_excerpt}         │
-│  source_excerpt = verbatim quote from document text          │
-│  Pydantic validation → reject any item missing source_excerpt│
-│  Insert Concept rows (source_document_id = this doc)         │
-└──────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌── Agent 2: Relationship Compiler ────────────────────────────┐
-│  Load all workspace Concepts                                 │
-│  Prompt Bob with concept list + document text                │
-│  Extracts: {source, target, relationship_type}               │
-│  Fuzzy-match concept names → resolve to Concept IDs         │
-│  Only accept relationships where both concepts exist in DB   │
-│  Insert Relationship rows                                    │
-└──────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌── Agent 3: Pattern Compiler ─────────────────────────────────┐
-│  Load workspace Concepts + Relationships                     │
-│  Prompt Bob with full workspace knowledge context            │
-│  Extracts: {name, problem_statement, ibm_approach[], ...}    │
-│  Upsert ConsultingPattern rows (by name within workspace)    │
-└──────────────────────────────────────────────────────────────┘
-        │
-        ▼
+Update graph memory (incremental node/edge add)
 Update Document: status=complete
 (on exception: status=failed, error_message=str(e))
 ```
 
 **Why this chained agent approach?**
-Concept extraction is scoped to a single document — it only needs that document's text.
-Relationship extraction needs the full workspace concept map to avoid hallucinating concept names.
-Pattern extraction needs the full workspace graph — it looks for cross-document recurring structures.
-Chaining these three agents lets each one benefit from the work of the previous while keeping the extraction logic separated and testable.
+Concept extraction is scoped to a single document. Relationship extraction needs the full workspace concept map to avoid hallucinating names. Pattern extraction needs the full workspace graph to find cross-document recurring structures. Each agent benefits from the previous one's output while remaining independently testable.
 
 ---
 
@@ -134,7 +144,7 @@ User question → POST /workspaces/{id}/ask
    Assemble context window: {concept, description, excerpt, source doc}
         │
         ▼
-4. Bob generates answer (Claude, context-only):
+4. LLM generates answer (Claude, context-only):
    System prompt: "Answer ONLY from the provided context.
    If context doesn't support the answer, say: not found in the uploaded knowledge.
    Cite every claim with [Source: Document Name]."
@@ -148,7 +158,7 @@ User question → POST /workspaces/{id}/ask
 ```
 
 **Why graph-first, not embeddings-first?**
-Graph traversal surfaces structured relationships — ISO 20022 *implements* SWIFT *enables* real-time settlement — that embedding similarity cannot. For IBM Consulting use cases where the *connection between concepts* is the value, graph traversal produces better context than nearest-neighbour vector retrieval. Embeddings can be layered in as a fallback if keyword matching proves too sparse, but graph traversal is the demo-differentiating mechanism.
+Graph traversal surfaces structured relationships — ISO 20022 *implements* SWIFT *enables* real-time settlement — that embedding similarity cannot. For IBM Consulting use cases where the *connection between concepts* is the value, graph traversal produces better context than nearest-neighbour vector retrieval. Embeddings can be layered in as a fallback if keyword matching proves too sparse, but graph traversal is the primary retrieval mechanism.
 
 ---
 

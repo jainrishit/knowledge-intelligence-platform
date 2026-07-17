@@ -8,119 +8,95 @@ between adjacent chunks so no context is lost at chunk edges.
 """
 from __future__ import annotations
 import io
+import logging
 import re
-from pathlib import Path
-from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def parse_pdf(file_bytes: bytes) -> tuple[str, dict]:
-    """Extract text from PDF using PyMuPDF."""
-    import fitz  # PyMuPDF
-
-    doc = fitz.open(stream=file_bytes, filetype="pdf")
-    pages = []
-    for page in doc:
-        pages.append(page.get_text("text"))
-    raw_text = "\n\n".join(pages)
-    meta = doc.metadata or {}
-    metadata = {
-        "title": meta.get("title") or "",
-        "author": meta.get("author") or "",
-        "page_count": doc.page_count,
-    }
-    doc.close()
-    return raw_text, metadata
+    """Extract text from PDF using PyMuPDF. Raises ValueError on corrupt input."""
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        pages = []
+        for page in doc:
+            pages.append(page.get_text("text"))
+        raw_text = "\n\n".join(pages)
+        meta = doc.metadata or {}
+        metadata = {
+            "title": meta.get("title") or "",
+            "author": meta.get("author") or "",
+            "page_count": doc.page_count,
+        }
+        doc.close()
+        return raw_text, metadata
+    except Exception as exc:
+        logger.error("PDF parsing failed: %s", exc)
+        raise ValueError(f"Could not parse PDF: {exc}") from exc
 
 
 def parse_docx(file_bytes: bytes) -> tuple[str, dict]:
-    """Extract text from DOCX using python-docx."""
-    from docx import Document
-
-    doc = Document(io.BytesIO(file_bytes))
-    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                if cell.text.strip():
-                    paragraphs.append(cell.text.strip())
-
-    raw_text = "\n\n".join(paragraphs)
-    core_props = doc.core_properties
-    metadata = {
-        "title": core_props.title or "",
-        "author": core_props.author or "",
-    }
-    return raw_text, metadata
+    """Extract text from DOCX using python-docx. Raises ValueError on corrupt input."""
+    try:
+        from docx import Document
+        doc = Document(io.BytesIO(file_bytes))
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    if cell.text.strip():
+                        paragraphs.append(cell.text.strip())
+        raw_text = "\n\n".join(paragraphs)
+        core_props = doc.core_properties
+        metadata = {
+            "title": core_props.title or "",
+            "author": core_props.author or "",
+        }
+        return raw_text, metadata
+    except Exception as exc:
+        logger.error("DOCX parsing failed: %s", exc)
+        raise ValueError(f"Could not parse DOCX: {exc}") from exc
 
 
 def parse_pptx(file_bytes: bytes) -> tuple[str, dict]:
-    """Extract text from PPTX using python-pptx."""
-    from pptx import Presentation
-
-    prs = Presentation(io.BytesIO(file_bytes))
-    slides_text = []
-    for i, slide in enumerate(prs.slides):
-        parts = []
-        for shape in slide.shapes:
-            if hasattr(shape, "text") and shape.text.strip():
-                parts.append(shape.text.strip())
-        if parts:
-            slides_text.append(f"[Slide {i + 1}]\n" + "\n".join(parts))
-
-    raw_text = "\n\n".join(slides_text)
-    core_props = prs.core_properties
-    metadata = {
-        "title": core_props.title or "",
-        "author": core_props.author or "",
-        "slide_count": len(prs.slides),
-    }
-    return raw_text, metadata
-
-
-def detect_file_type(filename: str, content_type: Optional[str] = None) -> Optional[str]:
-    """Return 'pdf', 'docx', 'pptx' or None for unsupported types."""
-    ext = Path(filename).suffix.lower()
-    mapping = {".pdf": "pdf", ".docx": "docx", ".pptx": "pptx"}
-    mime_mapping = {
-        "application/pdf": "pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
-    }
-    return mapping.get(ext) or (mime_mapping.get(content_type or "") if content_type else None)
+    """Extract text from PPTX using python-pptx. Raises ValueError on corrupt input."""
+    try:
+        from pptx import Presentation
+        prs = Presentation(io.BytesIO(file_bytes))
+        slides_text = []
+        for i, slide in enumerate(prs.slides):
+            parts = []
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    parts.append(shape.text.strip())
+            if parts:
+                slides_text.append(f"[Slide {i + 1}]\n" + "\n".join(parts))
+        raw_text = "\n\n".join(slides_text)
+        core_props = prs.core_properties
+        metadata = {
+            "title": core_props.title or "",
+            "author": core_props.author or "",
+            "slide_count": len(prs.slides),
+        }
+        return raw_text, metadata
+    except Exception as exc:
+        logger.error("PPTX parsing failed: %s", exc)
+        raise ValueError(f"Could not parse PPTX: {exc}") from exc
 
 
 def parse_document(file_bytes: bytes, file_type: str) -> tuple[str, dict]:
-    """Route to the correct parser based on file_type."""
+    """Route to the correct parser based on file_type. Propagates ValueError on corrupt input."""
     parsers = {"pdf": parse_pdf, "docx": parse_docx, "pptx": parse_pptx}
     if file_type not in parsers:
         raise ValueError(f"Unsupported file type: {file_type}")
     return parsers[file_type](file_bytes)
 
 
-# ── Chunking ──────────────────────────────────────────────────────────────────
+
 
 # Matches Markdown/document headers: #, ##, ### or ALL-CAPS lines ≥ 4 chars
 _HEADER_RE = re.compile(r"^(#{1,4}\s+.+|[A-Z][A-Z0-9 \-:]{3,})$", re.MULTILINE)
-
-
-def chunk_text(text: str, max_chars: int = 12000) -> list[str]:
-    """Paragraph-aware chunker. For new code prefer chunk_text_hierarchical()."""
-    if len(text) <= max_chars:
-        return [text]
-    chunks: list[str] = []
-    paragraphs = text.split("\n\n")
-    current: list[str] = []
-    current_len = 0
-    for para in paragraphs:
-        if current_len + len(para) + 2 > max_chars and current:
-            chunks.append("\n\n".join(current))
-            current = []
-            current_len = 0
-        current.append(para)
-        current_len += len(para) + 2
-    if current:
-        chunks.append("\n\n".join(current))
-    return chunks
 
 
 def chunk_text_hierarchical(

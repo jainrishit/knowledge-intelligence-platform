@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.db.session import get_db
-from app.db.models import Workspace, Document, Concept
+from app.db.models import Workspace, Document, Concept, Relationship, ConsultingPattern
 from app.schemas import WorkspaceCreate, WorkspaceOut
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -45,6 +45,8 @@ def delete_workspace(workspace_id: int, db: Session = Depends(get_db)):
 def _enrich(ws: Workspace, db: Session) -> WorkspaceOut:
     doc_count = db.query(func.count(Document.id)).filter(Document.workspace_id == ws.id).scalar() or 0
     concept_count = db.query(func.count(Concept.id)).filter(Concept.workspace_id == ws.id).scalar() or 0
+    rel_count = db.query(func.count(Relationship.id)).filter(Relationship.workspace_id == ws.id).scalar() or 0
+    pattern_count = db.query(func.count(ConsultingPattern.id)).filter(ConsultingPattern.workspace_id == ws.id).scalar() or 0
     return WorkspaceOut(
         id=ws.id,
         name=ws.name,
@@ -52,4 +54,8 @@ def _enrich(ws: Workspace, db: Session) -> WorkspaceOut:
         created_at=ws.created_at,
         document_count=doc_count,
         concept_count=concept_count,
+        relationship_count=rel_count,
+        pattern_count=pattern_count,
+        graph_version=ws.graph_version or 0,
+        graph_last_updated=ws.graph_last_updated,
     )

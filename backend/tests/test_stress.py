@@ -70,6 +70,9 @@ stress_client = TestClient(app, raise_server_exceptions=True)
 def reset_stress_db():
     Base.metadata.drop_all(bind=stress_engine)
     Base.metadata.create_all(bind=stress_engine)
+    # Clear the graph memory singleton so each test starts with a clean cache.
+    from app.graph.memory_manager import graph_memory_manager
+    graph_memory_manager._store.clear()
     yield
 
 

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '@/api/client';
-import type { AskResponse, ChatMessage } from '@/types/api';
-import { Send, ChevronDown, ChevronUp, Loader2, MessageSquare, FileText, AlertCircle } from 'lucide-react';
+import type { AskResponse, ChatMessage, Workspace } from '@/types/api';
+import { Send, ChevronDown, ChevronUp, Loader2, MessageSquare, FileText, AlertCircle, Network, X, GitBranch, TrendingUp } from 'lucide-react';
 
 function parseMarkdown(text: string): React.ReactNode[] {
   const lines = text.split('\n');
@@ -53,8 +53,8 @@ interface Message {
 
 const STARTER_QUESTIONS = [
   'What are the key concepts covered in this workspace?',
-  'What payment standards are discussed?',
-  'How does the IBM approach address this domain?',
+  'What are the main patterns or approaches identified?',
+  'How do the concepts in this workspace connect to each other?',
   'What are the main risks or challenges identified?',
 ];
 
@@ -133,17 +133,47 @@ function ChatBubble({ msg }: { msg: Message }) {
   );
 }
 
+function WorkspaceKnowledgeBadge({ ws }: { ws: Workspace | null }) {
+  if (!ws || ws.concept_count === 0) return null;
+  return (
+    <div className="mt-3 flex items-center gap-3 flex-wrap">
+      <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 bg-muted/60 border rounded text-muted-foreground">
+        <Network className="w-3 h-3 text-primary" />
+        <span className="font-semibold text-foreground">{ws.concept_count.toLocaleString()}</span> concepts
+      </span>
+      {ws.relationship_count > 0 && (
+        <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 bg-muted/60 border rounded text-muted-foreground">
+          <GitBranch className="w-3 h-3 text-primary" />
+          <span className="font-semibold text-foreground">{ws.relationship_count}</span> relationships
+        </span>
+      )}
+      {ws.pattern_count > 0 && (
+        <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 bg-muted/60 border rounded text-muted-foreground">
+          <TrendingUp className="w-3 h-3 text-primary" />
+          <span className="font-semibold text-foreground">{ws.pattern_count}</span> patterns
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function AssistantChat() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const wsId = Number(workspaceId);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const prefillState = (location.state as { prefill?: string; conceptName?: string } | null);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(prefillState?.prefill ?? '');
+  const [graphContext, setGraphContext] = useState<string | null>(prefillState?.conceptName ?? null);
   const [loading, setLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    api.workspaces.get(wsId).then(setWorkspace).catch(() => null);
     api.assistant.chatHistory(wsId).then((hist: ChatMessage[]) => {
       setMessages(
         hist.map(m => ({
@@ -195,19 +225,34 @@ export default function AssistantChat() {
   return (
     <div className="flex flex-col h-[calc(100vh-140px)] max-w-3xl mx-auto px-8">
 
-      {/* Header */}
       <div className="py-5 border-b flex-shrink-0">
         <h1 className="text-2xl font-semibold text-foreground">Knowledge Assistant</h1>
         <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
           Ask anything about this workspace's documents. Every answer is grounded exclusively in your uploaded
-          content. If a claim can't be traced to a source, the assistant says so explicitly.
+          content and cites its exact source.
         </p>
+
+        <WorkspaceKnowledgeBadge ws={workspace} />
+
+        {graphContext && (
+          <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 bg-primary/5 border border-primary/20 rounded text-xs">
+            <Network className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+            <span className="text-foreground">
+              Graph context: <span className="font-semibold">{graphContext}</span>
+            </span>
+            <button
+              onClick={() => { setGraphContext(null); navigate('.', { replace: true, state: {} }); }}
+              className="text-muted-foreground hover:text-foreground ml-1"
+              title="Clear graph context"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto py-6">
 
-        {/* Empty state — mentor welcome + starter questions */}
         {empty && (
           <div className="mb-6">
             <div className="callout mb-5">
@@ -215,18 +260,26 @@ export default function AssistantChat() {
               <ul className="text-xs text-muted-foreground space-y-1 mt-2">
                 <li className="flex items-start gap-2">
                   <span className="w-1 h-1 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                  It searches the knowledge graph built from your documents, not the internet.
+                  Searches the knowledge graph compiled from your documents — not the internet.
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="w-1 h-1 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                  Every answer cites its exact source document and excerpt.
+                  Every answer cites its exact source document and verbatim excerpt.
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="w-1 h-1 rounded-full bg-primary mt-1.5 flex-shrink-0" />
-                  If the answer isn't in your documents, it tells you. It never guesses.
+                  If the answer isn't in your documents, it says so. It never guesses.
                 </li>
               </ul>
             </div>
+
+            {workspace && workspace.concept_count === 0 && (
+              <div className="callout callout-amber mb-5 text-xs">
+                <span className="font-semibold text-foreground">No knowledge compiled yet.</span>{' '}
+                Upload documents in the Documents tab first — the assistant answers from your compiled knowledge graph.
+              </div>
+            )}
+
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Try asking</p>
             <div className="flex flex-col gap-2">
               {STARTER_QUESTIONS.map(q => (
@@ -261,7 +314,6 @@ export default function AssistantChat() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
       <div className="py-4 border-t flex-shrink-0">
         <form
           onSubmit={e => { e.preventDefault(); send(); }}

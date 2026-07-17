@@ -1,14 +1,11 @@
-// Typed API client — all calls proxy through Vite dev server to FastAPI at localhost:8000
 import type {
   Workspace, Document, Concept, Relationship, ConsultingPattern,
   GraphOut, AskResponse, ChatMessage, Deliverable,
-  DeliverableResponse, NodeNeighbourhood,
+  DeliverableType, NodeNeighbourhood,
 } from '@/types/api';
 
-const BASE = '';
-
 async function req<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const resp = await fetch(`${BASE}${url}`, {
+  const resp = await fetch(url, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
   });
@@ -18,8 +15,6 @@ async function req<T>(url: string, options: RequestInit = {}): Promise<T> {
   }
   return resp.json();
 }
-
-// ── Workspaces ───────────────────────────────────────────────────────
 
 export const api = {
   workspaces: {
@@ -34,7 +29,6 @@ export const api = {
       fetch(`/workspaces/${id}`, { method: 'DELETE' }),
   },
 
-  // ── Documents ────────────────────────────────────────────────────
   documents: {
     upload: (workspaceId: number, files: File[]) => {
       const form = new FormData();
@@ -53,7 +47,6 @@ export const api = {
     delete: (id: number) => fetch(`/documents/${id}`, { method: 'DELETE' }),
   },
 
-  // ── Knowledge ────────────────────────────────────────────────────
   knowledge: {
     concepts: (workspaceId: number) =>
       req<Concept[]>(`/workspaces/${workspaceId}/concepts`),
@@ -67,7 +60,6 @@ export const api = {
       req<NodeNeighbourhood>(`/workspaces/${workspaceId}/graph/node/${nodeId}`),
   },
 
-  // ── Assistant ─────────────────────────────────────────────────────
   assistant: {
     ask: (workspaceId: number, question: string) =>
       req<AskResponse>(`/workspaces/${workspaceId}/ask`, {
@@ -78,22 +70,53 @@ export const api = {
       req<ChatMessage[]>(`/workspaces/${workspaceId}/chat-history`),
   },
 
-  // ── Deliverables ─────────────────────────────────────────────────
   deliverables: {
-    create: (workspaceId: number, type: string, topic?: string, audience?: string) =>
-      req<DeliverableResponse>(`/workspaces/${workspaceId}/deliverables`, {
+    /**
+     * Generate a client material.
+     * Returns a Blob (PPTX file) plus metadata headers.
+     */
+    create: async (
+      workspaceId: number,
+      type: DeliverableType,
+      focus_area?: string,
+    ): Promise<{ blob: Blob; filename: string; title: string; sourceCount: number }> => {
+      const resp = await fetch(`/workspaces/${workspaceId}/deliverables`, {
         method: 'POST',
-        body: JSON.stringify({ type, topic, audience }),
-      }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, focus_area }),
+      });
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(detail.detail || `HTTP ${resp.status}`);
+      }
+      const blob = await resp.blob();
+      const cd = resp.headers.get('Content-Disposition') ?? '';
+      const fnMatch = cd.match(/filename="([^"]+)"/);
+      return {
+        blob,
+        filename: fnMatch?.[1] ?? `${type}.pptx`,
+        title: resp.headers.get('X-Deliverable-Title') ?? type,
+        sourceCount: parseInt(resp.headers.get('X-Source-Count') ?? '0', 10),
+      };
+    },
     list: (workspaceId: number) =>
       req<Deliverable[]>(`/workspaces/${workspaceId}/deliverables`),
     get: (id: number) => req<Deliverable>(`/deliverables/${id}`),
-    update: (id: number, content_markdown: string) =>
-      req<Deliverable>(`/deliverables/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ content_markdown }),
+    /** Re-generate and download a saved deliverable as a fresh PPTX blob. */
+    reExport: async (id: number): Promise<{ blob: Blob; filename: string }> => {
+      const resp = await fetch(`/deliverables/${id}/export`);
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(detail.detail || `HTTP ${resp.status}`);
+      }
+      const blob = await resp.blob();
+      const cd = resp.headers.get('Content-Disposition') ?? '';
+      const fnMatch = cd.match(/filename="([^"]+)"/);
+      return { blob, filename: fnMatch?.[1] ?? `deliverable_${id}.pptx` };
+    },
+    delete: (id: number) =>
+      fetch(`/deliverables/${id}`, { method: 'DELETE' }).then(r => {
+        if (!r.ok && r.status !== 204) throw new Error(`HTTP ${r.status}`);
       }),
-    exportUrl: (id: number, format: 'md' | 'docx') =>
-      `/deliverables/${id}/export?format=${format}`,
   },
 };

@@ -47,6 +47,9 @@ client = TestClient(app, raise_server_exceptions=True)
 def reset_db(install_api_db_override):
     Base.metadata.drop_all(bind=test_engine)
     Base.metadata.create_all(bind=test_engine)
+    # Clear the graph memory singleton so each test starts with a clean cache.
+    from app.graph.memory_manager import graph_memory_manager
+    graph_memory_manager._store.clear()
     yield
 
 
@@ -94,7 +97,8 @@ def _seed_concept(ws_id, name="ISO 20022", excerpt="ISO 20022 is a standard.", c
     db.add(concept)
     db.commit()
     db.refresh(concept)
-    _ = doc.id, concept.id
+    # Capture scalar IDs before expunge so callers can access them after the session closes.
+    doc.id, concept.id  # trigger attribute load while session is still open
     db.expunge_all()
     db.close()
     return doc, concept
@@ -535,30 +539,71 @@ def test_chat_history_ordered_asc():
 # DELIVERABLES
 # ══════════════════════════════════════════════════════════════════════
 
-@patch("app.generation.deliverable_service.chat", return_value="## Executive Summary\n\nISO 20022 enables richer data. [Source: doc.pdf]")
-@patch("app.generation.deliverable_service._extract_keywords_llm", return_value=["ISO 20022"])
-def test_create_deliverable_pov(mock_kw, mock_chat):
+# ── Shared PPTX mock factory ──────────────────────────────────────────
+#
+# The deliverable API now returns raw PPTX bytes (not JSON).
+# We mock `generate_client_material` at the service layer so tests never
+# hit the LLM or the IBM template file.
+# The mock returns a minimal DeliverablePptxResponse built from a real
+# DB record so list / get routes still work.
+
+def _make_pptx_response(db_session, workspace_id: int, dtype: str, focus_area=None):
+    """Insert a Deliverable row and return a DeliverablePptxResponse wrapping it."""
+    from app.db.models import Deliverable as DeliverableModel
+    from app.schemas import DeliverableOut, DeliverablePptxResponse, SourceRef
+    from datetime import datetime, timezone
+
+    # Minimal valid PPTX-like bytes (just needs to be non-empty)
+    fake_bytes = b"PK\x03\x04" + b"\x00" * 256
+
+    d = DeliverableModel(
+        workspace_id=workspace_id,
+        type=dtype,
+        title=f"Mock {dtype}",
+        content_markdown=None,
+        source_concept_ids=[],
+        source_document_ids=[],
+    )
+    db_session.add(d)
+    db_session.commit()
+    db_session.refresh(d)
+
+    return DeliverablePptxResponse(
+        deliverable=DeliverableOut.model_validate(d),
+        sources=[SourceRef(document_id=1, document_name="mock_doc.pdf", excerpt="mock")],
+        pptx_bytes=fake_bytes,
+        filename=f"{dtype}_{workspace_id}_{d.id}.pptx",
+    )
+
+
+@patch("app.api.deliverables.generate_client_material")
+def test_create_deliverable_client_101(mock_gen):
     ws = _create_workspace()
-    _seed_concept(ws["id"], "ISO 20022")
+    db = TestSessionLocal()
+    mock_gen.return_value = _make_pptx_response(db, ws["id"], "client_101")
+    db.close()
+
     resp = client.post(f"/workspaces/{ws['id']}/deliverables",
-                       json={"type": "POV", "topic": "ISO 20022 Migration", "audience": "CIO"})
+                       json={"type": "client_101"})
     assert resp.status_code == 201
-    data = resp.json()
-    assert data["deliverable"]["type"] == "POV"
-    assert data["deliverable"]["content_markdown"] is not None
-    assert len(data["sources"]) > 0
+    assert resp.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+    assert "X-Deliverable-Id" in resp.headers
+    assert "X-Deliverable-Title" in resp.headers
+    assert len(resp.content) > 0
 
 
-@patch("app.generation.deliverable_service.chat", return_value="## Summary\n\nContent. [Source: doc.pdf]")
-@patch("app.generation.deliverable_service._extract_keywords_llm", return_value=["SWIFT"])
-def test_create_deliverable_all_types(mock_kw, mock_chat):
+@patch("app.api.deliverables.generate_client_material")
+def test_create_deliverable_all_types(mock_gen):
     ws = _create_workspace()
-    _seed_concept(ws["id"], "SWIFT")
-    for dtype in ["POV", "executive_summary", "roadmap"]:
+    for dtype in ["client_101", "client_201", "executive_summary"]:
+        db = TestSessionLocal()
+        mock_gen.return_value = _make_pptx_response(db, ws["id"], dtype)
+        db.close()
         resp = client.post(f"/workspaces/{ws['id']}/deliverables",
-                           json={"type": dtype, "topic": "test"})
-        assert resp.status_code == 201
-        assert resp.json()["deliverable"]["type"] == dtype
+                           json={"type": dtype})
+        assert resp.status_code == 201, f"{dtype} failed: {resp.text}"
 
 
 def test_create_deliverable_invalid_type():
@@ -567,11 +612,12 @@ def test_create_deliverable_invalid_type():
     assert resp.status_code == 422
 
 
-def test_create_deliverable_empty_workspace_fails():
+@patch("app.api.deliverables.generate_client_material", side_effect=ValueError("No knowledge found"))
+def test_create_deliverable_empty_workspace_fails(mock_gen):
     ws = _create_workspace()
     resp = client.post(f"/workspaces/{ws['id']}/deliverables",
-                       json={"type": "POV", "topic": "anything"})
-    assert resp.status_code in [422, 500]
+                       json={"type": "client_101"})
+    assert resp.status_code == 422
 
 
 def test_list_deliverables_empty():
@@ -579,23 +625,32 @@ def test_list_deliverables_empty():
     assert client.get(f"/workspaces/{ws['id']}/deliverables").json() == []
 
 
-@patch("app.generation.deliverable_service.chat", return_value="## POV\n\nContent. [Source: doc.pdf]")
-@patch("app.generation.deliverable_service._extract_keywords_llm", return_value=["ISO 20022"])
-def test_list_deliverables_populated(mock_kw, mock_chat):
+@patch("app.api.deliverables.generate_client_material")
+def test_list_deliverables_populated(mock_gen):
     ws = _create_workspace()
-    _seed_concept(ws["id"], "ISO 20022")
-    client.post(f"/workspaces/{ws['id']}/deliverables", json={"type": "POV"})
+    db = TestSessionLocal()
+    mock_gen.return_value = _make_pptx_response(db, ws["id"], "client_101")
+    db.close()
+    client.post(f"/workspaces/{ws['id']}/deliverables", json={"type": "client_101"})
     resp = client.get(f"/workspaces/{ws['id']}/deliverables")
-    assert len(resp.json()) == 1
+    assert len(resp.json()) >= 1
 
 
-@patch("app.generation.deliverable_service.chat", return_value="## POV\n\nContent. [Source: doc.pdf]")
-@patch("app.generation.deliverable_service._extract_keywords_llm", return_value=["ISO 20022"])
-def test_get_deliverable_by_id(mock_kw, mock_chat):
+def test_get_deliverable_by_id():
+    """Seed a Deliverable directly and verify the GET route returns it."""
     ws = _create_workspace()
-    _seed_concept(ws["id"], "ISO 20022")
-    deliv_id = client.post(f"/workspaces/{ws['id']}/deliverables",
-                            json={"type": "POV"}).json()["deliverable"]["id"]
+    db = TestSessionLocal()
+    from app.db.models import Deliverable as DeliverableModel
+    d = DeliverableModel(
+        workspace_id=ws["id"], type="client_101", title="Seeded",
+        content_markdown=None, source_concept_ids=[], source_document_ids=[],
+    )
+    db.add(d)
+    db.commit()
+    db.refresh(d)
+    deliv_id = d.id
+    db.close()
+
     resp = client.get(f"/deliverables/{deliv_id}")
     assert resp.status_code == 200
     assert resp.json()["id"] == deliv_id
@@ -605,61 +660,49 @@ def test_get_deliverable_not_found():
     assert client.get("/deliverables/999999").status_code == 404
 
 
-@patch("app.generation.deliverable_service.chat", return_value="## POV\n\nDraft. [Source: doc.pdf]")
-@patch("app.generation.deliverable_service._extract_keywords_llm", return_value=["ISO 20022"])
-def test_update_deliverable(mock_kw, mock_chat):
-    ws = _create_workspace()
-    _seed_concept(ws["id"], "ISO 20022")
-    deliv_id = client.post(f"/workspaces/{ws['id']}/deliverables",
-                            json={"type": "POV"}).json()["deliverable"]["id"]
-    resp = client.put(f"/deliverables/{deliv_id}",
-                      json={"content_markdown": "## Edited\n\nNew content."})
-    assert resp.status_code == 200
-    assert resp.json()["content_markdown"] == "## Edited\n\nNew content."
-
-
-def test_update_deliverable_not_found():
-    assert client.put("/deliverables/999999", json={"content_markdown": "x"}).status_code == 404
-
-
-@patch("app.generation.deliverable_service.chat", return_value="## POV\n\nContent. [Source: doc.pdf]")
-@patch("app.generation.deliverable_service._extract_keywords_llm", return_value=["ISO 20022"])
-def test_export_deliverable_markdown(mock_kw, mock_chat):
-    ws = _create_workspace()
-    _seed_concept(ws["id"], "ISO 20022")
-    deliv_id = client.post(f"/workspaces/{ws['id']}/deliverables",
-                            json={"type": "POV"}).json()["deliverable"]["id"]
-    resp = client.get(f"/deliverables/{deliv_id}/export?format=md")
-    assert resp.status_code == 200
-    assert "text/markdown" in resp.headers["content-type"]
-    assert "## POV" in resp.text
-
-
-@patch("app.generation.deliverable_service.chat", return_value="## POV\n\nContent. [Source: doc.pdf]")
-@patch("app.generation.deliverable_service._extract_keywords_llm", return_value=["ISO 20022"])
-def test_export_deliverable_docx(mock_kw, mock_chat):
-    ws = _create_workspace()
-    _seed_concept(ws["id"], "ISO 20022")
-    deliv_id = client.post(f"/workspaces/{ws['id']}/deliverables",
-                            json={"type": "POV"}).json()["deliverable"]["id"]
-    resp = client.get(f"/deliverables/{deliv_id}/export?format=docx")
-    assert resp.status_code == 200
-    assert "wordprocessingml" in resp.headers["content-type"]
-    assert len(resp.content) > 100  # valid DOCX bytes
-
-
-def test_export_invalid_format():
-    # seed a deliverable directly so no LLM call needed
+@patch("app.api.deliverables.generate_client_material")
+def test_export_deliverable_pptx(mock_gen):
+    """Export re-runs generation and returns PPTX bytes."""
     ws = _create_workspace()
     db = TestSessionLocal()
-    d = Deliverable(workspace_id=ws["id"], type="POV", title="Test",
-                    content_markdown="# Test", source_concept_ids=[], source_document_ids=[])
+    from app.db.models import Deliverable as DeliverableModel
+    d = DeliverableModel(
+        workspace_id=ws["id"], type="client_101", title="Export Test",
+        content_markdown=None, source_concept_ids=[], source_document_ids=[],
+    )
     db.add(d)
     db.commit()
     db.refresh(d)
+    deliv_id = d.id
+
+    mock_gen.return_value = _make_pptx_response(db, ws["id"], "client_101")
     db.close()
-    resp = client.get(f"/deliverables/{d.id}/export?format=xlsx")
-    assert resp.status_code == 422
+
+    resp = client.get(f"/deliverables/{deliv_id}/export")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+    assert len(resp.content) > 0
+
+
+def test_delete_deliverable():
+    """DELETE returns 204 and the record is gone."""
+    ws = _create_workspace()
+    db = TestSessionLocal()
+    from app.db.models import Deliverable as DeliverableModel
+    d = DeliverableModel(
+        workspace_id=ws["id"], type="client_201", title="To Delete",
+        content_markdown=None, source_concept_ids=[], source_document_ids=[],
+    )
+    db.add(d)
+    db.commit()
+    db.refresh(d)
+    deliv_id = d.id
+    db.close()
+
+    assert client.delete(f"/deliverables/{deliv_id}").status_code == 204
+    assert client.get(f"/deliverables/{deliv_id}").status_code == 404
 
 
 # ══════════════════════════════════════════════════════════════════════

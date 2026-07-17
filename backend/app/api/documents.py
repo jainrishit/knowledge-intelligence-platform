@@ -1,5 +1,4 @@
 """Documents API router — upload, list, detail, delete."""
-import os
 import uuid
 from pathlib import Path
 
@@ -7,9 +6,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Backgro
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core.upload_validation import validate_upload
 from app.db.session import get_db
 from app.db.models import Document, Workspace
-from app.ingestion.parsers import detect_file_type
+from app.graph.memory_manager import graph_memory_manager
 from app.ingestion.pipeline import run_ingestion_pipeline
 from app.schemas import DocumentOut, DocumentDetail
 
@@ -37,22 +37,16 @@ async def upload_documents(
     created = []
 
     for file in files:
-        file_type = detect_file_type(file.filename or "", file.content_type)
-        if not file_type:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Unsupported file type for '{file.filename}'. Accepted: PDF, DOCX, PPTX.",
-            )
+        validated = await validate_upload(file)
 
         unique_name = f"{uuid.uuid4().hex}_{file.filename}"
         file_path = UPLOAD_DIR / unique_name
-        content = await file.read()
-        file_path.write_bytes(content)
+        file_path.write_bytes(validated.content)
 
         doc = Document(
             workspace_id=workspace_id,
             filename=str(file_path.absolute()),
-            file_type=file_type,
+            file_type=validated.file_type,
             title=Path(file.filename or "").stem,
             upload_status="pending",
         )
@@ -88,5 +82,7 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
     doc = db.get(Document, document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")
+    workspace_id = doc.workspace_id
+    graph_memory_manager.remove_document_contributions(workspace_id, doc.id)
     db.delete(doc)
     db.commit()

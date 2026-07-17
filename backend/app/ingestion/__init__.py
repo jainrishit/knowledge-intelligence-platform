@@ -1,1 +1,1 @@
-"""Make ingestion a package."""
+"""Document ingestion — parsers (PDF/DOCX/PPTX) and the orchestration pipeline."""

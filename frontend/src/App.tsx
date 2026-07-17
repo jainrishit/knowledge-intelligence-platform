@@ -7,9 +7,9 @@ import DeliverableGenerator from '@/pages/DeliverableGenerator';
 import { ArrowLeft } from 'lucide-react';
 
 const TABS = [
-  { path: 'documents',    label: 'Documents',       step: 1, hint: 'Upload assets' },
+  { path: 'documents',    label: 'Documents',       step: 1, hint: 'Ingest & compile' },
   { path: 'graph',        label: 'Knowledge Graph', step: 2, hint: 'Explore concepts' },
-  { path: 'chat',         label: 'Assistant',       step: 3, hint: 'Ask questions' },
+  { path: 'chat',         label: 'Assistant',       step: 3, hint: 'Evidence-grounded Q&A' },
   { path: 'deliverables', label: 'Deliverables',    step: 4, hint: 'Generate outputs' },
 ];
 
@@ -20,7 +20,7 @@ function WorkspaceNav() {
 
   return (
     <div className="border-b bg-white">
-      <div className="px-8 pt-3 pb-0 flex items-center gap-2">
+      <div className="px-8 pt-3 pb-0 flex items-center justify-between">
         <button
           onClick={() => navigate('/')}
           className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -28,6 +28,7 @@ function WorkspaceNav() {
           <ArrowLeft className="w-3 h-3" />
           All workspaces
         </button>
+        <span className="text-[10px] text-muted-foreground border px-2 py-0.5 rounded">Workspace Knowledge</span>
       </div>
       <nav className="flex px-8 gap-0 mt-1">
         {TABS.map(t => (

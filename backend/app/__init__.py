@@ -1,1 +1,1 @@
-"""Make app a package."""
+"""Knowledge Intelligence Platform — FastAPI backend application package."""

@@ -148,43 +148,6 @@ def test_parse_pptx_empty():
     assert meta["slide_count"] == 0
 
 
-# ══════════════════════════════════════════════════════════════════════
-# FILE TYPE DETECTION
-# ══════════════════════════════════════════════════════════════════════
-
-def test_detect_by_extension():
-    from app.ingestion.parsers import detect_file_type
-    assert detect_file_type("report.pdf") == "pdf"
-    assert detect_file_type("deck.pptx") == "pptx"
-    assert detect_file_type("spec.docx") == "docx"
-
-
-def test_detect_case_insensitive():
-    from app.ingestion.parsers import detect_file_type
-    assert detect_file_type("REPORT.PDF") == "pdf"
-    assert detect_file_type("Deck.PPTX") == "pptx"
-
-
-def test_detect_unsupported_returns_none():
-    from app.ingestion.parsers import detect_file_type
-    assert detect_file_type("image.png") is None
-    assert detect_file_type("data.csv") is None
-    assert detect_file_type("README.md") is None
-
-
-def test_detect_by_mime_fallback():
-    from app.ingestion.parsers import detect_file_type
-    assert detect_file_type("noext", "application/pdf") == "pdf"
-    assert detect_file_type("noext", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") == "docx"
-    assert detect_file_type("noext", "application/vnd.openxmlformats-officedocument.presentationml.presentation") == "pptx"
-
-
-def test_detect_extension_takes_priority():
-    """Extension beats MIME when both present."""
-    from app.ingestion.parsers import detect_file_type
-    assert detect_file_type("file.pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") == "pdf"
-
-
 def test_parse_document_router():
     from app.ingestion.parsers import parse_document
     text, _ = parse_document(make_pdf_bytes("ISO 20022"), "pdf")
@@ -195,29 +158,6 @@ def test_parse_document_unknown_type_raises():
     from app.ingestion.parsers import parse_document
     with pytest.raises(ValueError):
         parse_document(b"data", "xlsx")
-
-
-# ══════════════════════════════════════════════════════════════════════
-# chunk_text (legacy — backward compat)
-# ══════════════════════════════════════════════════════════════════════
-
-def test_chunk_text_short_returns_single():
-    from app.ingestion.parsers import chunk_text
-    assert chunk_text("Hello world", max_chars=1000) == ["Hello world"]
-
-
-def test_chunk_text_splits_at_paragraph():
-    from app.ingestion.parsers import chunk_text
-    text = "\n\n".join(["para " + "x" * 100 for _ in range(20)])
-    chunks = chunk_text(text, max_chars=500)
-    assert len(chunks) > 1
-    for c in chunks:
-        assert len(c) <= 620  # may slightly exceed at para boundary
-
-
-def test_chunk_text_empty_string():
-    from app.ingestion.parsers import chunk_text
-    assert chunk_text("", max_chars=1000) == [""]
 
 
 # ══════════════════════════════════════════════════════════════════════

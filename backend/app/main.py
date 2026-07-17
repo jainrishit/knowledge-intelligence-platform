@@ -8,12 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db.session import init_db
-from app.api import workspaces, documents, graph, assistant, deliverables
+from app.api import workspaces, documents, graph, assistant, deliverables, admin
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    from app.graph.memory_manager import graph_memory_manager
+    graph_memory_manager.startup_load()
     yield
 
 
@@ -42,6 +44,7 @@ app.include_router(documents.router)
 app.include_router(graph.router)
 app.include_router(assistant.router)
 app.include_router(deliverables.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

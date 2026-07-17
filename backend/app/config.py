@@ -9,8 +9,10 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    # LLM — IBM Consulting Advantage endpoint
-    claude_api_key: str = Field(alias="CLAUDE_API_KEY")
+    # Raw key for local dev. In production, set CLAUDE_SECRET_NAME and use a
+    # cloud SecretProvider so the key never needs to be in the environment.
+    claude_api_key: str = Field(default="", alias="CLAUDE_API_KEY")
+    claude_secret_name: str = Field(default="CLAUDE_API_KEY", alias="CLAUDE_SECRET_NAME")
     claude_base_url: str = Field(
         default="https://api.nextgen-beta.ica.ibm.com/ica",
         alias="CLAUDE_BASE_URL",
@@ -19,10 +21,12 @@ class Settings(BaseSettings):
 
     # Storage
     database_url: str = Field(
-        default="sqlite:///./bob_knowledge_fabric.db",
+        default="sqlite:///./knowledge_platform.db",
         alias="DATABASE_URL",
     )
     upload_dir: str = Field(default="./uploads", alias="UPLOAD_DIR")
+    upload_max_bytes: int = Field(default=26_214_400, alias="MAX_UPLOAD_BYTES")  # 25 MB per file
+    spreadsheet_max_rows: int = Field(default=10_000, alias="SPREADSHEET_MAX_ROWS")
 
     # Chunking
     chunk_size: int = Field(default=3000, alias="CHUNK_SIZE")
@@ -36,8 +40,34 @@ class Settings(BaseSettings):
     # Extraction quality
     concept_confidence_min: float = Field(default=0.6, alias="CONCEPT_CONFIDENCE_MIN")
 
+    # Pattern extraction threshold — minimum workspace knowledge growth (%) to trigger re-extraction
+    pattern_extraction_threshold_pct: float = Field(
+        default=10.0, alias="PATTERN_EXTRACTION_THRESHOLD_PERCENT"
+    )
+
     # QA retrieval
     qa_top_k: int = Field(default=20, alias="QA_TOP_K")
+
+    # LLM governance — circuit breaker
+    llm_cb_failure_threshold: int = Field(default=5, alias="LLM_CB_FAILURE_THRESHOLD")
+    llm_cb_recovery_timeout: float = Field(default=60.0, alias="LLM_CB_RECOVERY_TIMEOUT")
+
+    # LLM governance — rate limiting
+    max_llm_requests_per_minute: int = Field(default=60, alias="MAX_LLM_REQUESTS_PER_MINUTE")
+    llm_rate_window_seconds: float = Field(default=60.0, alias="LLM_RATE_WINDOW_SECONDS")
+
+    # LLM governance — cost tracking (USD per 1 000 tokens, Claude Sonnet defaults)
+    llm_cost_per_1k_input_tokens: float = Field(default=0.003, alias="LLM_COST_PER_1K_INPUT_TOKENS")
+    llm_cost_per_1k_output_tokens: float = Field(default=0.015, alias="LLM_COST_PER_1K_OUTPUT_TOKENS")
+
+    # LLM resilience — timeouts (seconds)
+    llm_connect_timeout: float = Field(default=10.0, alias="LLM_CONNECT_TIMEOUT")
+    llm_read_timeout: float = Field(default=120.0, alias="LLM_READ_TIMEOUT")
+    llm_write_timeout: float = Field(default=30.0, alias="LLM_WRITE_TIMEOUT")
+
+    # LLM resilience — retry strategy
+    llm_max_retries: int = Field(default=4, alias="LLM_MAX_RETRIES")
+    llm_retry_max_wait: float = Field(default=30.0, alias="LLM_RETRY_MAX_WAIT")
 
     # Server
     cors_origins: str = Field(

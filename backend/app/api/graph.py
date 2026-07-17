@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.db.models import Concept, Relationship, ConsultingPattern, Document, Workspace
-from app.graph.builder import build_workspace_graph, graph_to_react_flow
+from app.graph.builder import graph_to_react_flow
+from app.graph.memory_manager import graph_memory_manager
 from app.graph.traversal import get_neighbourhood
 from app.schemas import (
     ConceptOut, RelationshipOut, ConsultingPatternOut,
@@ -38,7 +39,7 @@ def list_patterns(workspace_id: int, db: Session = Depends(get_db)):
 @router.get("/workspaces/{workspace_id}/graph", response_model=GraphOut)
 def get_graph(workspace_id: int, db: Session = Depends(get_db)):
     _require_workspace(workspace_id, db)
-    G = build_workspace_graph(db, workspace_id)
+    G = graph_memory_manager.get_workspace_graph(workspace_id, db)
     data = graph_to_react_flow(G)
     return GraphOut(**data)
 
@@ -50,7 +51,7 @@ def get_node_neighbourhood(workspace_id: int, node_id: int, hops: int = 2, db: S
     if not concept or concept.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Node not found in this workspace.")
 
-    G = build_workspace_graph(db, workspace_id)
+    G = graph_memory_manager.get_workspace_graph(workspace_id, db)
     nbr_node_ids, nbr_edges = get_neighbourhood(G, node_id, hops=hops)
 
     neighbours = [

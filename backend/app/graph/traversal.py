@@ -12,7 +12,6 @@ shortest_weighted_path() — uses edge weight (1/strength) to surface
 """
 from __future__ import annotations
 import networkx as nx
-from sqlalchemy.orm import Session
 
 from app.db.models import Concept
 

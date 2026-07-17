@@ -16,12 +16,12 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.models import Concept, Document
 from app.ingestion.parsers import chunk_text_hierarchical
-from app.llm import chat
+from app.llm_client import chat
 
 logger = logging.getLogger(__name__)
 
 CONCEPT_SYSTEM_PROMPT = """\
-You are Bob, an AI-native knowledge compiler for IBM Consulting.
+You are an AI knowledge compiler for IBM Consulting.
 Extract ALL significant concepts from the consulting document text provided.
 You work strictly from what is written — never introduce general knowledge, external facts, or internet search results.
 
@@ -92,9 +92,9 @@ def _call_llm(text_chunk: str) -> list[dict[str, Any]]:
             return json.loads(raw)
         except (json.JSONDecodeError, IndexError) as e:
             if attempt == 0:
-                logger.warning(f"Concept extraction JSON parse failed (attempt 1), retrying: {e}")
+                logger.warning("Concept extraction JSON parse failed (attempt 1), retrying: %s", e)
             else:
-                logger.error(f"Concept extraction JSON parse failed after retry: {e}")
+                logger.error("Concept extraction JSON parse failed after retry: %s", e)
                 return []
     return []
 
@@ -105,7 +105,7 @@ def extract_concepts(db: Session, doc: Document) -> list[Concept]:
     Uses hierarchical chunking with overlap; filters by confidence threshold.
     """
     if not doc.raw_text or len(doc.raw_text.strip()) < 100:
-        logger.info(f"[doc={doc.id}] Text too short for concept extraction, skipping.")
+        logger.info("[doc=%d] Text too short for concept extraction, skipping.", doc.id)
         return []
 
     chunks = chunk_text_hierarchical(
@@ -128,13 +128,13 @@ def extract_concepts(db: Session, doc: Document) -> list[Concept]:
             try:
                 item = ConceptItem(**raw)
             except ValidationError as ve:
-                logger.warning(f"[doc={doc.id}] Rejected concept (validation failed): {raw} — {ve}")
+                logger.warning("[doc=%d] Rejected concept (validation failed): %s — %s", doc.id, raw, ve)
                 continue
 
             if item.confidence < settings.concept_confidence_min:
                 logger.debug(
-                    f"[doc={doc.id}] Skipped low-confidence concept '{item.name}' "
-                    f"(confidence={item.confidence:.2f} < {settings.concept_confidence_min})"
+                    "[doc=%d] Skipped low-confidence concept '%s' (confidence=%.2f < %.2f)",
+                    doc.id, item.name, item.confidence, settings.concept_confidence_min,
                 )
                 continue
 
@@ -157,5 +157,5 @@ def extract_concepts(db: Session, doc: Document) -> list[Concept]:
             created.append(concept)
 
     db.commit()
-    logger.info(f"[doc={doc.id}] Extracted {len(created)} concepts (confidence ≥ {settings.concept_confidence_min}).")
+    logger.info("[doc=%d] Extracted %d concepts (confidence ≥ %.2f).", doc.id, len(created), settings.concept_confidence_min)
     return created

@@ -18,3 +18,7 @@ pytest>=8.2.0
 pytest-asyncio>=0.23.0
 thefuzz>=0.22.1
 python-Levenshtein>=0.25.0
+filetype>=1.2.0
+tenacity>=8.2.0
+openpyxl>=3.1.0
+xlrd>=2.0.1

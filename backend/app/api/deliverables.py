@@ -1,27 +1,53 @@
-"""Deliverables API router — generate, list, detail, update, export."""
+"""Deliverables API router — generate client materials as PowerPoint presentations."""
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.db.models import Deliverable, Workspace
-from app.generation.deliverable_service import generate_deliverable, export_as_docx
-from app.schemas import DeliverableCreate, DeliverableUpdate, DeliverableOut, DeliverableResponse
+from app.generation.deliverable_service import generate_client_material
+from app.schemas import DeliverableCreate, DeliverableOut, DeliverablePptxResponse
 
 router = APIRouter(tags=["deliverables"])
 
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
-@router.post("/workspaces/{workspace_id}/deliverables", response_model=DeliverableResponse, status_code=201)
+
+@router.post("/workspaces/{workspace_id}/deliverables", status_code=201)
 def create_deliverable(workspace_id: int, body: DeliverableCreate, db: Session = Depends(get_db)):
+    """
+    Generate a client material PowerPoint and return it as a file download.
+
+    Supported types: client_101, client_201, executive_summary.
+    focus_area is only used for executive_summary.
+    """
     ws = db.get(Workspace, workspace_id)
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found.")
     try:
-        return generate_deliverable(db, workspace_id, body.type, body.topic, body.audience)
+        result: DeliverablePptxResponse = generate_client_material(
+            db=db,
+            workspace_id=workspace_id,
+            deliverable_type=body.type,
+            focus_area=body.focus_area,
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    return Response(
+        content=result.pptx_bytes,
+        media_type=PPTX_MIME,
+        status_code=201,
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"',
+            # Pass metadata back as custom headers for the frontend
+            "X-Deliverable-Id": str(result.deliverable.id),
+            "X-Deliverable-Title": result.deliverable.title,
+            "X-Source-Count": str(len(result.sources)),
+        },
+    )
 
 
 @router.get("/workspaces/{workspace_id}/deliverables", response_model=list[DeliverableOut])
@@ -41,35 +67,43 @@ def get_deliverable(deliverable_id: int, db: Session = Depends(get_db)):
     return DeliverableOut.model_validate(d)
 
 
-@router.put("/deliverables/{deliverable_id}", response_model=DeliverableOut)
-def update_deliverable(deliverable_id: int, body: DeliverableUpdate, db: Session = Depends(get_db)):
-    d = db.get(Deliverable, deliverable_id)
-    if not d:
-        raise HTTPException(status_code=404, detail="Deliverable not found.")
-    d.content_markdown = body.content_markdown
-    db.commit()
-    db.refresh(d)
-    return DeliverableOut.model_validate(d)
-
-
 @router.get("/deliverables/{deliverable_id}/export")
-def export_deliverable(deliverable_id: int, format: str = "md", db: Session = Depends(get_db)):
+def export_deliverable(deliverable_id: int, db: Session = Depends(get_db)):
+    """
+    Re-generate and return the PPTX for a saved deliverable record.
+    Re-runs generation using the current workspace knowledge.
+    """
     d = db.get(Deliverable, deliverable_id)
     if not d:
         raise HTTPException(status_code=404, detail="Deliverable not found.")
-    content = d.content_markdown or ""
-    if format == "md":
-        return Response(
-            content=content,
-            media_type="text/markdown",
-            headers={"Content-Disposition": f'attachment; filename="{d.title}.md"'},
+
+    try:
+        result: DeliverablePptxResponse = generate_client_material(
+            db=db,
+            workspace_id=d.workspace_id,
+            deliverable_type=d.type,
+            focus_area=None,
         )
-    elif format == "docx":
-        docx_bytes = export_as_docx(content, d.title)
-        return Response(
-            content=docx_bytes,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f'attachment; filename="{d.title}.docx"'},
-        )
-    else:
-        raise HTTPException(status_code=422, detail="Invalid format. Use 'md' or 'docx'.")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return Response(
+        content=result.pptx_bytes,
+        media_type=PPTX_MIME,
+        headers={
+            "Content-Disposition": f'attachment; filename="{result.filename}"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
+@router.delete("/deliverables/{deliverable_id}", status_code=204)
+def delete_deliverable(deliverable_id: int, db: Session = Depends(get_db)):
+    """Delete a saved deliverable record."""
+    d = db.get(Deliverable, deliverable_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="Deliverable not found.")
+    db.delete(d)
+    db.commit()

@@ -18,15 +18,15 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import Concept, Document, ConsultingPattern, ChatMessage
-from app.graph.builder import build_workspace_graph
+from app.graph.memory_manager import graph_memory_manager
 from app.graph.traversal import find_nodes_semantic, get_neighbourhood
-from app.llm import chat
+from app.llm_client import chat
 from app.schemas import AskResponse, SourceRef
 
 logger = logging.getLogger(__name__)
 
 QA_SYSTEM_PROMPT = """\
-You are Bob, an AI-native knowledge compiler and assistant for IBM Consulting.
+You are an AI knowledge compiler and assistant for IBM Consulting.
 You MUST answer ONLY from the context passages provided below — this is your only source of truth.
 Do NOT use general knowledge, training data, internet search, or any external information.
 If the context does not support the answer to the question, you MUST respond with exactly:
@@ -62,7 +62,7 @@ def _extract_keywords_llm(question: str) -> list[str]:
                 raw = raw[4:]
         return json.loads(raw)
     except Exception as e:
-        logger.warning(f"LLM keyword extraction failed: {e}")
+        logger.warning("LLM keyword extraction failed: %s", e)
         return [w.strip(".,?!") for w in question.split() if len(w) > 4]
 
 
@@ -89,9 +89,9 @@ def ask_workspace(db: Session, workspace_id: int, question: str) -> AskResponse:
     """
 
     keywords = _extract_keywords_llm(question)
-    logger.info(f"[ws={workspace_id}] Q&A keywords: {keywords}")
+    logger.info("[ws=%d] Q&A keywords: %s", workspace_id, keywords)
 
-    G = build_workspace_graph(db, workspace_id)
+    G = graph_memory_manager.get_workspace_graph(workspace_id, db)
     scored_seeds = find_nodes_semantic(G, keywords, top_k=settings.qa_top_k)
 
     # Fall back to direct DB name scan when the graph has no matching nodes
@@ -210,7 +210,7 @@ def ask_workspace(db: Session, workspace_id: int, question: str) -> AskResponse:
             temperature=0.0,
         )
     except Exception as e:
-        logger.error(f"ICA QA call failed: {e}")
+        logger.error("QA generation failed: %s", e)
         answer = "An error occurred while generating the answer. Please try again."
         source_refs = []
 

@@ -17,12 +17,13 @@ from thefuzz import process as fuzzy_process
 
 from app.config import settings
 from app.db.models import Concept, Document, Relationship, ALLOWED_RELATIONSHIP_TYPES
-from app.llm import chat
+from app.ingestion.parsers import chunk_text_hierarchical
+from app.llm_client import chat
 
 logger = logging.getLogger(__name__)
 
 RELATIONSHIP_SYSTEM_PROMPT = """\
-You are Bob, an AI-native knowledge compiler for IBM Consulting.
+You are an AI knowledge compiler for IBM Consulting.
 Discover relationships between concepts compiled from IBM consulting documents.
 Work strictly from the provided document text — no external knowledge, no fabrication.
 
@@ -70,7 +71,7 @@ def _fuzzy_resolve(name: str, name_to_id: dict[str, int]) -> int | None:
         return name_to_id[name.lower()]
     result = fuzzy_process.extractOne(name, list(name_to_id.keys()))
     if result and result[1] >= FUZZY_THRESHOLD:
-        logger.debug(f"Fuzzy matched '{name}' → '{result[0]}' (score {result[1]})")
+        logger.debug("Fuzzy matched '%s' → '%s' (score %s)", name, result[0], result[1])
         return name_to_id[result[0]]
     return None
 
@@ -94,9 +95,9 @@ def _call_llm(concept_list_text: str, doc_chunk: str) -> list[dict[str, Any]]:
             return json.loads(raw)
         except (json.JSONDecodeError, IndexError) as e:
             if attempt == 0:
-                logger.warning(f"Relationship extraction JSON parse failed (attempt 1): {e}")
+                logger.warning("Relationship extraction JSON parse failed (attempt 1): %s", e)
             else:
-                logger.error(f"Relationship extraction JSON parse failed after retry: {e}")
+                logger.error("Relationship extraction JSON parse failed after retry: %s", e)
                 return []
     return []
 
@@ -109,13 +110,12 @@ def extract_relationships(db: Session, doc: Document) -> list[Relationship]:
         .all()
     )
     if len(all_concepts) < 2:
-        logger.info(f"[doc={doc.id}] Fewer than 2 concepts in workspace, skipping relationship extraction.")
+        logger.info("[doc=%d] Fewer than 2 concepts in workspace, skipping relationship extraction.", doc.id)
         return []
 
     name_to_id = {c.name.lower(): c.id for c in all_concepts}
     concept_list_text = "\n".join(f"- {c.name} ({c.type})" for c in all_concepts)
 
-    from app.ingestion.parsers import chunk_text_hierarchical
     chunks = chunk_text_hierarchical(
         doc.raw_text or "",
         max_chars=settings.chunk_size * 4,
@@ -134,7 +134,7 @@ def extract_relationships(db: Session, doc: Document) -> list[Relationship]:
             try:
                 item = RelationshipItem(**raw)
             except ValidationError as ve:
-                logger.warning(f"[doc={doc.id}] Rejected relationship: {raw} — {ve}")
+                logger.warning("[doc=%d] Rejected relationship: %s — %s", doc.id, raw, ve)
                 continue
 
             if item.strength < 0.5:
@@ -169,5 +169,5 @@ def extract_relationships(db: Session, doc: Document) -> list[Relationship]:
             created.append(rel)
 
     db.commit()
-    logger.info(f"[doc={doc.id}] Extracted {len(created)} relationships.")
+    logger.info("[doc=%d] Extracted %d relationships.", doc.id, len(created))
     return created
