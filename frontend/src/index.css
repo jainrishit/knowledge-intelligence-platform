@@ -8,29 +8,29 @@
     --foreground: 0 0% 7%;
     --card: 0 0% 100%;
     --card-foreground: 0 0% 7%;
-    --muted: 210 17% 97%;
-    --muted-foreground: 0 0% 44%;
-    --primary: 220 90% 46%;
+    --muted: 0 0% 97%;
+    --muted-foreground: 0 0% 46%;
+    --primary: 0 0% 12%;
     --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 20%;
     --secondary-foreground: 0 0% 100%;
-    --border: 0 0% 89%;
-    --accent: 220 90% 46%;
+    --border: 0 0% 90%;
+    --accent: 0 0% 12%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 72% 51%;
+    --destructive: 0 60% 45%;
     --destructive-foreground: 0 0% 100%;
-    --radius: 0.25rem;
-    /* concept-type palette */
-    --c-standard:    220 80% 52%;
-    --c-technology:  258 70% 55%;
-    --c-methodology: 162 60% 40%;
-    --c-framework:   32  90% 48%;
-    --c-process:     195 75% 42%;
-    --c-capability:  340 65% 50%;
-    --c-regulation:  0   65% 50%;
-    --c-pattern:     145 55% 40%;
-    --c-tool:        260 55% 58%;
-    --c-general:     0   0%  54%;
+    --radius: 0.125rem;
+    /* concept-type palette — muted, professional */
+    --c-standard:    215 40% 45%;
+    --c-technology:  250 35% 48%;
+    --c-methodology: 160 35% 38%;
+    --c-framework:   28  50% 42%;
+    --c-process:     195 40% 40%;
+    --c-capability:  340 35% 45%;
+    --c-regulation:  0   40% 42%;
+    --c-pattern:     145 35% 38%;
+    --c-tool:        255 30% 50%;
+    --c-general:     0   0%  50%;
   }
 
   body {

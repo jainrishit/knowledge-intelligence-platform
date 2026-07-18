@@ -116,8 +116,11 @@ def _build_graph_intelligence(
         if G.has_node(nid):
             node_degree[nid] = G.in_degree(nid) + G.out_degree(nid)
 
-    # Top 60 by degree — enough depth without context explosion
-    top_nodes = sorted(node_degree, key=lambda n: node_degree[n], reverse=True)[:60]
+    # Top 30 by degree — reduced from 60 to keep the intelligence brief under ~8k chars.
+    # The top 30 nodes by degree are the backbone of the workspace graph; nodes 31-60
+    # add marginal signal but double the §1 section size and push the total prompt over
+    # 20k input tokens, which destabilises the IBM Gateway under load.
+    top_nodes = sorted(node_degree, key=lambda n: node_degree[n], reverse=True)[:30]
 
     # ── 2. Pull concept records for top nodes ─────────────────────────────────
     concepts = db.query(Concept).filter(Concept.id.in_(top_nodes)).all()
@@ -146,6 +149,8 @@ def _build_graph_intelligence(
                 ))
 
     # ── 3. Build §1: Top concepts section ────────────────────────────────────
+    # Description is truncated to 160 chars to avoid bloating the brief with
+    # very long descriptions while still conveying the core concept meaning.
     concept_lines: list[str] = []
     for nid in top_nodes:
         c = concept_by_id.get(nid)
@@ -153,10 +158,13 @@ def _build_graph_intelligence(
             continue
         degree = node_degree[nid]
         doc_name = doc_name_by_id.get(c.source_document_id or -1, "Unknown")
+        desc = (c.description or "(no description)")[:160]
+        if c.description and len(c.description) > 160:
+            desc += "…"
         concept_lines.append(
             f"  [{c.type or 'General'}] {c.name} (connections: {degree}, "
             f"confidence: {c.confidence:.2f})\n"
-            f"    {c.description or '(no description)'}\n"
+            f"    {desc}\n"
             f"    Source: {doc_name}"
         )
 
@@ -167,7 +175,7 @@ def _build_graph_intelligence(
         if src not in top_node_set or tgt not in top_node_set:
             continue
         strength = float(data.get("strength", 0.7))
-        if strength < 0.6:
+        if strength < 0.5:  # lowered from 0.6 — include implied relationships
             continue
         src_c = concept_by_id.get(src)
         tgt_c = concept_by_id.get(tgt)
@@ -186,6 +194,9 @@ def _build_graph_intelligence(
     relationship_lines = [line for _, line in strong_edges[:40]]
 
     # ── 5. Build §3: Consulting patterns ─────────────────────────────────────
+    # Only the first 2 approach steps are included (truncated to 120 chars each).
+    # Full 4-step approaches average ~800 chars per pattern; this reduces §3 from
+    # ~15k chars to ~4k chars without losing the pattern's essential signal.
     patterns = db.query(ConsultingPattern).filter(
         ConsultingPattern.workspace_id == workspace_id
     ).all()
@@ -194,10 +205,12 @@ def _build_graph_intelligence(
         related_ids = set(p.related_concept_ids or [])
         if not related_ids.intersection(set(concept_ids)):
             continue
-        steps = "; ".join((p.ibm_approach or [])[:4])
+        approach_steps = (p.ibm_approach or [])[:2]
+        steps = "; ".join(s[:120] for s in approach_steps)
+        problem = (p.problem_statement or "(none)")[:200]
         pattern_lines.append(
             f"  Pattern: {p.name}\n"
-            f"    Problem: {p.problem_statement or '(none)'}\n"
+            f"    Problem: {problem}\n"
             f"    Approach: {steps or '(none)'}"
         )
         for did in (p.source_document_ids or []):
@@ -335,6 +348,11 @@ def _retrieve_relevant_nodes(
     When focus_area is None (Client 101 / Client 201 — whole workspace), return
     all nodes immediately without BFS traversal.  The BFS is O(N²) on a full
     graph and produces the same result as returning all nodes directly.
+
+    When focus_area is provided, BFS uses a 0.4 strength threshold so that only
+    meaningfully supported relationships are followed during topic expansion.
+    This prevents a focused executive summary from drifting into loosely-connected
+    concepts that dilute the final intelligence brief.
     """
     if not focus_area:
         # Short-circuit: no focus — every node is relevant
@@ -345,7 +363,8 @@ def _retrieve_relevant_nodes(
 
     relevant: set[int] = set()
     for nid in matched:
-        nbr_nodes, _ = get_neighbourhood(G, nid, hops=2)
+        # Use a 0.4 strength floor so BFS follows only credible connections.
+        nbr_nodes, _ = get_neighbourhood(G, nid, hops=2, strength_threshold=0.4)
         relevant.update(nbr_nodes)
 
     return relevant or set(G.nodes())
@@ -536,7 +555,12 @@ Return a JSON object with this structure:
       "boxes": ["Concise box content.", "Concise box content."],
       "stats": [{"label": "METRIC", "body": "supporting context sentence"}],
       "notes": "speaker notes — expand on bullets, add context the presenter needs",
-      "visual_recommendation": "description of a diagram or visual that would strengthen this slide"
+      "visual_recommendation": "description of a diagram or visual that would strengthen this slide",
+      "key_insights": ["The single most important consulting insight this slide communicates.", "Second insight if the slide covers two distinct points."],
+      "graph_concepts": ["ConceptName1", "ConceptName2"],
+      "relationships_used": ["ConceptA -> ConceptB (relationship_type)", "ConceptC -> ConceptD (relationship_type)"],
+      "patterns_used": ["Pattern name if applicable"],
+      "evidence": ["Document name that supports this slide's claims"]
     }
   ],
   "metadata": {
@@ -546,6 +570,19 @@ Return a JSON object with this structure:
     "generation_notes": "bottom-line summary: governing insight + narrative arc"
   }
 }
+
+ANNOTATION FIELDS — mandatory for every content slide (not required for section_divider, cover, end_slide):
+  "key_insights"       — 1–3 consulting insights this slide communicates, stated as complete sentences; these are the
+                         "so what" takeaways the user sees during plan review before approving generation
+  "graph_concepts"     — list of specific concept names from the Graph Intelligence Brief that this slide draws on
+  "relationships_used" — list of relationships this slide's narrative depends on, formatted "A -> B (type)"
+  "patterns_used"      — list of consulting pattern names from §3 that apply to this slide (empty list if none)
+  "evidence"           — list of source document names from §4 that support the claims on this slide
+
+These annotation fields serve two purposes:
+  1. They force you to verify that every slide is grounded in the graph — no grounding means no slide.
+  2. They are shown to the user during plan review so they can see exactly what intelligence each slide uses,
+     including the key insights the slide is designed to communicate.
 
 Return ONLY the JSON object.  No preamble.  No markdown fences.  Start with { and end with }.
 """
@@ -757,8 +794,17 @@ def _blueprint_to_deck_spec(
             getattr(sr, "document_name", str(sr)) for sr in source_refs
         ]
 
-    # Normalise slides: renumber, strip blueprint-only keys
-    _BLUEPRINT_ONLY_KEYS = {"purpose", "section", "visual_recommendation"}
+    # Normalise slides: renumber, strip blueprint-only and plan-annotation keys.
+    # - "purpose", "section", "visual_recommendation" are planning metadata.
+    # - "key_insights", "graph_concepts", "relationships_used", "patterns_used",
+    #   "evidence" are plan-review annotation fields shown to the user before
+    #   approval; the PowerPoint renderer has no use for them and they must not
+    #   appear in the rendered output.
+    _BLUEPRINT_ONLY_KEYS = {
+        "purpose", "section", "visual_recommendation",
+        "key_insights", "graph_concepts", "relationships_used",
+        "patterns_used", "evidence",
+    }
     slides_out: list[dict] = []
     for i, slide in enumerate(slides_in, start=1):
         s = {k: v for k, v in slide.items() if k not in _BLUEPRINT_ONLY_KEYS}
@@ -777,46 +823,762 @@ def _blueprint_to_deck_spec(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Phase 4 — Presentation Review (post-normalise, pre-render)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PRESENTATION_REVIEW_SYSTEM_PROMPT = """\
+You are a senior IBM Consulting partner reviewing a finalised presentation spec
+immediately before it is rendered into PowerPoint.
+
+You are NOT rewriting the deck from scratch.
+You are NOT generating new content from outside the spec.
+You ARE a consulting manager doing a final quality pass to ensure every slide
+earns its place, every layout is optimal, and the deck reads like a
+consultant-prepared document — not an auto-generated one.
+
+═══════════════════════════════════════════════════════════════════
+YOUR MANDATE
+═══════════════════════════════════════════════════════════════════
+
+Return a corrected deck_spec that is immediately renderable.
+Every correction must be reflected in the corrected_deck_spec.
+Do not report issues you did not fix.
+
+═══════════════════════════════════════════════════════════════════
+PASS 1 — SLIDE REMOVAL
+═══════════════════════════════════════════════════════════════════
+
+Remove any slide that meets any of these conditions:
+
+  • No content: title only, no bullets / boxes / columns / stats.
+  • Pure placeholder: title is a category label with no supporting content
+    ("Overview", "Introduction", "Background", "Conclusion", "Summary",
+    "Next Steps", "Key Challenges", "Strategic Priorities").
+  • Redundant: the same finding or topic already covered by another slide —
+    merge the unique points into the better slide and delete this one.
+  • Section orphan: a section_divider with zero content slides following it.
+  • Duplicate section_divider: two consecutive section_dividers — keep one.
+  • Unsupported: no bullets, no boxes, no columns, no stats.
+    Exception: section_divider, large_text, end_slide are exempt.
+
+After each removal, renumber slide_number sequentially from 1.
+Record: "REMOVED slide [N] '[title]' — [reason]"
+
+═══════════════════════════════════════════════════════════════════
+PASS 2 — TITLE REWRITES
+═══════════════════════════════════════════════════════════════════
+
+For every content slide (layout NOT IN section_divider, end_slide):
+  Is the title a TAKEAWAY STATEMENT — does it state a finding, conclusion,
+  or recommendation specific to this deck?
+
+  Labels to fix (rewrite to a takeaway):
+    "Overview", "Introduction", "Background", "Current State", "Summary",
+    "Conclusion", "Key Challenges", "Strategic Priorities", "Opportunities",
+    "Recommendations", "Risks", "Next Steps", "Architecture", "Approach"
+
+  A takeaway title:
+    ✓ States the conclusion the slide proves
+    ✓ Can be read alone and understood without the bullets
+    ✓ Is specific — references a named concept, technology, or finding
+
+  If you cannot write a meaningful takeaway from the existing bullets,
+  the slide has no purpose — remove it (record the removal).
+  Record each rewrite: "RETITLED slide [N]: '[old]' → '[new]'"
+
+═══════════════════════════════════════════════════════════════════
+PASS 3 — LAYOUT OPTIMISATION  (visual-first enforcement)
+═══════════════════════════════════════════════════════════════════
+
+COUNT how many content slides use title_content.
+Content slides = layout NOT IN (section_divider, end_slide).
+
+If more than 55% of content slides use title_content, convert slides to
+better layouts.  Apply these conversion rules:
+
+  RULE A — Exactly 4 bullets → convert to four_boxes_wide or four_boxes_stacked.
+    Move bullets to "boxes" field.  Remove "bullets" field.
+
+  RULE B — 5 or 6 bullets → convert to six_boxes.
+    Move bullets to "boxes" field.  Remove "bullets" field.
+
+  RULE C — Slide compares two things (current/target, as-is/to-be, before/after,
+    two parallel tracks) → convert to two_col_dividers.
+    Split bullets evenly between columns.  Set "col_heads" to the two themes.
+    Set "columns" field.  Remove "bullets" field.
+
+  RULE D — Slide has 4 equal parallel pillars, workstreams, or phases →
+    convert to four_column.  Split bullets into 4 equal groups.
+    Set "columns" field.  Remove "bullets" field.
+
+  RULE E — Slide has 3 parallel themes with headings → four_column_headlines.
+    Set "col_heads" (3 items) and "columns" (3 lists).
+
+  RULE F — Slide has exactly 2 headline metrics with supporting context →
+    convert to data_2_callouts.  Extract the two metrics as stats entries:
+    {"label": "<metric>", "body": "<supporting sentence>"}.
+    Remove "bullets" field.
+
+  RULE G — If no large_text slide exists in the deck and there is a governing
+    insight slide: convert the most important insight slide to large_text.
+    Set the title to the full insight statement.  Remove bullets.
+
+  Priority order: A > B > C > D > E > F > G.
+  Stop converting once title_content share drops to ≤55% of content slides.
+  Record: "CONVERTED slide [N] from title_content to [layout]: [reason]"
+
+═══════════════════════════════════════════════════════════════════
+PASS 4 — BULLET QUALITY
+═══════════════════════════════════════════════════════════════════
+
+For every bullet in every slide in the corrected spec:
+
+  ✓ Must be a complete grammatical sentence (subject + verb + object).
+    INCOMPLETE: "Legacy system constraints" → complete it.
+
+  ✓ Must end with a period (never "..." or "…" or a dangling clause).
+    FIX: complete the sentence, add period.
+
+  ✓ Must be 20–100 characters.
+    LONG: split at natural clause boundary into two separate bullets.
+
+  ✓ Must NOT open with vague filler:
+    "This shows...", "It is important...", "There are...",
+    "Various...", "Multiple...", "Many organizations...", "Key aspects..."
+    FIX: rewrite to lead with the specific insight.
+
+  Fixing a truncated bullet is allowed.
+  Inventing a new bullet from nothing is not allowed.
+
+═══════════════════════════════════════════════════════════════════
+PASS 5 — STRUCTURAL INTEGRITY
+═══════════════════════════════════════════════════════════════════
+
+After Passes 1–4:
+
+  A — Every section_divider must have ≥1 content slide following it before
+      the next section_divider or end of deck.
+      FAIL → remove the orphaned section_divider.
+
+  B — The deck must end with an end_slide.
+      FAIL → append one.
+
+  C — Renumber all slide_number fields sequentially from 1.
+
+  D — Update metadata.total_slides to the final slide count.
+
+═══════════════════════════════════════════════════════════════════
+OUTPUT FORMAT
+═══════════════════════════════════════════════════════════════════
+
+{
+  "presentation_review_score": <integer 1–10 — score the CORRECTED output>,
+  "slides_removed": <integer>,
+  "slides_retitled": <integer>,
+  "slides_converted": <integer>,
+  "bullets_fixed": <integer>,
+  "corrections": [
+    "REMOVED slide 4 'Key Challenges' — label-only title with no supporting content",
+    "RETITLED slide 6: 'Overview' → 'ISO 20022 adoption reshapes cross-border settlement'",
+    "CONVERTED slide 9 from title_content to four_boxes_wide — 4 strategic priorities"
+  ],
+  "corrected_deck_spec": { <complete corrected deck_spec — same schema as input> }
+}
+
+ABSOLUTE RULES:
+  - corrected_deck_spec must be a COMPLETE, valid deck_spec — all slides, all fields.
+  - Do NOT invent new content.  Fix and improve only what is present.
+  - Do NOT change deliverable_type, title, focus_area, or metadata.source_documents
+    unless they are empty strings.
+  - Every entry in "corrections" must be reflected in corrected_deck_spec — no phantom fixes.
+  - Return ONLY the JSON object.  No preamble.  No markdown fences.  Start with { end with }.
+"""
+
+
+def _build_presentation_review_message(deck_spec: dict) -> str:
+    """Construct the user message for Phase 4 (presentation review)."""
+    slide_count    = len(deck_spec.get("slides", []))
+    content_slides = [
+        s for s in deck_spec.get("slides", [])
+        if s.get("layout") not in ("section_divider", "end_slide", "cover")
+    ]
+    title_content_count = sum(
+        1 for s in content_slides
+        if s.get("layout", "title_content") in ("title_content", "callout_stat")
+    )
+    pct = round(100 * title_content_count / len(content_slides)) if content_slides else 0
+
+    return (
+        f"DECK SPEC TO REVIEW:\n"
+        f"Total slides: {slide_count} | Content slides: {len(content_slides)} | "
+        f"title_content share: {pct}% (target ≤55%)\n\n"
+        + json.dumps(deck_spec, indent=2)
+        + "\n\nApply all passes and return the corrected deck_spec JSON. Start with {{ and end with }}."
+    )
+
+
+def _review_deck_spec(deck_spec: dict, context: str = "") -> dict:
+    """
+    Phase 4 — Presentation Review.
+
+    Claude acts as a consulting manager reviewing the finalised deck spec for:
+      - slide removal (empty, redundant, orphaned)
+      - title rewrites (labels → takeaways)
+      - layout conversion (visual-first enforcement)
+      - bullet quality fixes
+      - structural integrity
+
+    Returns the corrected deck_spec.  Falls back to the original on any error.
+
+    Args:
+        deck_spec: The normalised deck spec from _blueprint_to_deck_spec().
+        context:   Log prefix (e.g. "ws=5 type=client_101").
+    """
+    review_message = _build_presentation_review_message(deck_spec)
+
+    try:
+        raw = chat(
+            system=_PRESENTATION_REVIEW_SYSTEM_PROMPT,
+            user=review_message,
+            max_tokens=8192,
+            operation="presentation_review",
+        )
+    except Exception as exc:
+        logger.error("[presentation_review %s] LLM call failed: %s — using original spec", context, exc)
+        return deck_spec
+
+    try:
+        result = _parse_json(raw, "presentation_review")
+    except RuntimeError:
+        logger.error("[presentation_review %s] JSON parse failed — using original spec", context)
+        return deck_spec
+
+    corrected = result.get("corrected_deck_spec")
+    if not corrected or not isinstance(corrected, dict) or not corrected.get("slides"):
+        logger.warning(
+            "[presentation_review %s] No valid corrected_deck_spec returned — using original spec",
+            context,
+        )
+        return deck_spec
+
+    score          = result.get("presentation_review_score")
+    corrections    = result.get("corrections", [])
+    n_removed      = result.get("slides_removed", 0)
+    n_retitled     = result.get("slides_retitled", 0)
+    n_converted    = result.get("slides_converted", 0)
+    n_bullets_fixed = result.get("bullets_fixed", 0)
+
+    logger.info(
+        "[presentation_review %s] score=%s | removed=%d retitled=%d converted=%d bullets_fixed=%d",
+        context, score, n_removed, n_retitled, n_converted, n_bullets_fixed,
+    )
+    if corrections:
+        logger.info(
+            "[presentation_review %s] corrections: %s",
+            context, "; ".join(corrections[:6]),
+        )
+
+    # Re-renumber slide_number fields sequentially to guarantee monotonic order
+    slides = corrected.get("slides") or []
+    for i, s in enumerate(slides, start=1):
+        s["slide_number"] = i
+    if "metadata" in corrected:
+        corrected["metadata"]["total_slides"] = len(slides)
+
+    return corrected
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Validation Layer — deterministic pre-render gate (no LLM calls)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_STRUCTURAL_LAYOUTS = frozenset({"section_divider", "cover", "end_slide", "sources"})
+_EXEMPT_LAYOUTS = frozenset({"section_divider", "cover", "end_slide", "large_text",
+                              "data_2_callouts", "callout_stat", "sources"})
+
+_LABEL_TITLES = frozenset({
+    "overview", "introduction", "background", "current state", "summary",
+    "conclusion", "key challenges", "strategic priorities", "opportunities",
+    "recommendations", "risks", "next steps", "architecture", "approach",
+    "agenda", "thank you", "questions",
+})
+
+# Maximum safe bullet lengths to prevent overflow in the rendered slide.
+# Bullets longer than this are split at the nearest sentence boundary (". ")
+# or truncated with "…" to keep within the layout frame.
+_MAX_BULLET_CHARS = 200
+
+
+def _split_long_bullet(bullet: str, max_chars: int = _MAX_BULLET_CHARS) -> list[str]:
+    """
+    Split a single overly long bullet into ≤2 shorter ones at a sentence
+    boundary.  If no sentence break exists within the limit, truncate at a
+    word boundary and append "…".
+    """
+    if len(bullet) <= max_chars:
+        return [bullet]
+
+    # Try to split at a sentence boundary before the limit
+    boundary = bullet[:max_chars].rfind(". ")
+    if boundary > 20:
+        part1 = bullet[:boundary + 1].strip()
+        part2 = bullet[boundary + 1:].strip()
+        if part2 and not part1.endswith((".", "!", "?")):
+            part1 += "."
+        return [p for p in [part1, part2] if p]
+
+    # Fall back to word boundary truncation
+    truncated = bullet[:max_chars].rsplit(" ", 1)[0]
+    if truncated and not truncated.endswith((".", "!", "?")):
+        truncated += "…"
+    return [truncated]
+
+
+def _validate_deck_spec(deck_spec: dict, context: str = "") -> dict:
+    """
+    Deterministic validation gate — runs immediately before PPTX render.
+    No LLM calls.  Fixes or removes slides that fail quality criteria.
+
+    Checks performed (spec: Validation Layer):
+      1. No empty slides (title-only with no content fields populated)
+      2. No title-only placeholder slides (label titles without content)
+      3. Template compliance — layout must have required fields; demote to
+         title_content and copy content when the required field is absent
+         (overlap risk prevention):
+           - four_boxes_wide / four_boxes_stacked → needs ≥2 non-empty boxes
+           - six_boxes → needs ≥4 non-empty boxes
+           - two_col_dividers → needs col_heads (list) + columns (2 lists)
+           - four_column / four_column_headlines → needs columns (list of lists)
+           - data_2_callouts → needs exactly 2 stats entries
+      4. Sentence completeness: bullets must end with a period
+      5. Overflow risk: long bullets are split; bullet lists are capped per
+         layout safe limits
+      6. Renumber and update metadata after any removals
+
+    Returns the validated (and possibly modified) deck_spec.
+    """
+    slides_in = deck_spec.get("slides") or []
+    slides_out: list[dict] = []
+    removed: list[str] = []
+    fixed: list[str] = []
+
+    for slide in slides_in:
+        layout = slide.get("layout", "title_content")
+        title  = (slide.get("title") or "").strip()
+        title_lower = title.lower()
+
+        # ── Skip all structural / exempt layouts without content checks ────────
+        if layout in _STRUCTURAL_LAYOUTS:
+            slides_out.append(slide)
+            continue
+
+        # ── Check 1: empty slide — no content at all ──────────────────────────
+        has_content = bool(
+            slide.get("bullets")
+            or slide.get("boxes")
+            or slide.get("columns")
+            or slide.get("stats")
+            or layout in _EXEMPT_LAYOUTS   # large_text, data_2_callouts etc.
+        )
+        if not has_content:
+            removed.append(f"REMOVED slide '{title}' — no content (empty slide)")
+            continue
+
+        # ── Check 2: pure label title with skeleton content ───────────────────
+        if title_lower in _LABEL_TITLES:
+            # Only remove if it also has minimal content (≤1 bullet)
+            bullet_count = len(slide.get("bullets") or [])
+            if bullet_count <= 1:
+                removed.append(
+                    f"REMOVED slide '{title}' — generic label title with insufficient content"
+                )
+                continue
+
+        # ── Check 3: template compliance — layout field requirements ──────────
+        slide = dict(slide)  # shallow copy so we can mutate safely
+
+        if layout in ("four_boxes_wide", "four_boxes_stacked"):
+            boxes = [b for b in (slide.get("boxes") or []) if b and b.strip()]
+            if len(boxes) < 2:
+                # Demote: convert bullets → boxes if there are enough, else fall
+                # back to title_content so at least the content renders.
+                bullets = slide.get("bullets") or []
+                if len(bullets) >= 2:
+                    slide["boxes"] = bullets[:6]
+                    slide.pop("bullets", None)
+                    fixed.append(
+                        f"FIXED slide '{title}' ({layout}): promoted bullets to boxes"
+                    )
+                else:
+                    slide["layout"] = "title_content"
+                    fixed.append(
+                        f"DEMOTED slide '{title}' from {layout} to title_content — "
+                        f"insufficient boxes ({len(boxes)})"
+                    )
+
+        elif layout == "six_boxes":
+            boxes = [b for b in (slide.get("boxes") or []) if b and b.strip()]
+            if len(boxes) < 4:
+                bullets = slide.get("bullets") or []
+                if len(bullets) >= 4:
+                    slide["boxes"] = bullets[:6]
+                    slide.pop("bullets", None)
+                    fixed.append(
+                        f"FIXED slide '{title}' (six_boxes): promoted bullets to boxes"
+                    )
+                else:
+                    slide["layout"] = "title_content"
+                    fixed.append(
+                        f"DEMOTED slide '{title}' from six_boxes to title_content — "
+                        f"insufficient boxes ({len(boxes)})"
+                    )
+
+        elif layout == "two_col_dividers":
+            col_heads = slide.get("col_heads") or []
+            columns   = slide.get("columns") or []
+            if len(col_heads) < 2 or len(columns) < 2:
+                # Salvage: if there are bullets, split them evenly across 2 columns
+                bullets = slide.get("bullets") or []
+                if len(bullets) >= 2:
+                    mid = len(bullets) // 2
+                    slide["columns"] = [bullets[:mid], bullets[mid:]]
+                    if len(col_heads) < 2:
+                        slide["col_heads"] = ["", ""]
+                    slide.pop("bullets", None)
+                    fixed.append(
+                        f"FIXED slide '{title}' (two_col_dividers): split bullets into columns"
+                    )
+                else:
+                    slide["layout"] = "title_content"
+                    fixed.append(
+                        f"DEMOTED slide '{title}' from two_col_dividers to title_content — "
+                        f"missing col_heads or columns"
+                    )
+
+        elif layout in ("four_column", "four_column_headlines"):
+            columns = slide.get("columns") or []
+            # columns must be a list of lists with at least 2 non-empty sub-lists
+            valid_cols = [c for c in columns if isinstance(c, list) and c]
+            if len(valid_cols) < 2:
+                bullets = slide.get("bullets") or []
+                if len(bullets) >= 2:
+                    # Split bullets evenly across 4 groups (or fewer if < 4 bullets)
+                    n = min(4, len(bullets))
+                    groups: list[list[str]] = [[] for _ in range(n)]
+                    for idx, b in enumerate(bullets):
+                        groups[idx % n].append(b)
+                    slide["columns"] = groups
+                    slide.pop("bullets", None)
+                    fixed.append(
+                        f"FIXED slide '{title}' ({layout}): split bullets into columns"
+                    )
+                else:
+                    slide["layout"] = "title_content"
+                    fixed.append(
+                        f"DEMOTED slide '{title}' from {layout} to title_content — "
+                        f"missing or invalid columns field"
+                    )
+
+        elif layout == "data_2_callouts":
+            stats = slide.get("stats") or []
+            valid_stats = [s for s in stats if isinstance(s, dict) and s.get("label")]
+            if len(valid_stats) < 2:
+                # Try to salvage from bullets
+                bullets = slide.get("bullets") or []
+                if len(bullets) >= 2:
+                    slide["stats"] = [
+                        {"label": b[:40].strip(), "body": b}
+                        for b in bullets[:2]
+                    ]
+                    slide.pop("bullets", None)
+                    fixed.append(
+                        f"FIXED slide '{title}' (data_2_callouts): built stats from bullets"
+                    )
+                else:
+                    slide["layout"] = "title_content"
+                    fixed.append(
+                        f"DEMOTED slide '{title}' from data_2_callouts to title_content — "
+                        f"fewer than 2 valid stats entries"
+                    )
+            elif len(valid_stats) > 2:
+                # Cap at 2 to prevent overflow
+                slide["stats"] = valid_stats[:2]
+                fixed.append(
+                    f"CAPPED slide '{title}' (data_2_callouts) stats to 2 entries (overflow guard)"
+                )
+
+        # ── Check 4: fix bullets — ensure period termination ─────────────────
+        if slide.get("bullets"):
+            fixed_bullets = []
+            for b in slide["bullets"]:
+                b = b.strip()
+                if b and not b.endswith((".", "!", "?", "…")):
+                    b = b + "."
+                    fixed.append(f"Fixed bullet termination on slide '{title}'")
+                fixed_bullets.append(b)
+            slide["bullets"] = fixed_bullets
+
+        # ── Check 5a: overflow risk — split long bullets ──────────────────────
+        if slide.get("bullets"):
+            expanded: list[str] = []
+            for b in slide["bullets"]:
+                parts = _split_long_bullet(b)
+                if len(parts) > 1:
+                    fixed.append(f"Split long bullet on slide '{title}' ({len(b)} chars)")
+                expanded.extend(parts)
+            slide["bullets"] = expanded
+
+        # ── Check 5b: overflow guard — cap bullets per layout ────────────────
+        # title_content: ≤7; two_column: ≤12; agenda: ≤10
+        max_bullets: dict[str, int] = {
+            "title_content": 7,
+            "two_column": 12,
+            "agenda": 10,
+            "callout_stat": 4,
+        }
+        if slide.get("layout", layout) in max_bullets and slide.get("bullets"):
+            cap = max_bullets[slide["layout"]]
+            if len(slide["bullets"]) > cap:
+                slide["bullets"] = slide["bullets"][:cap]
+                fixed.append(f"Truncated bullets on slide '{title}' to {cap} (overflow guard)")
+
+        # ── Check 5c: overflow guard — cap boxes per layout ──────────────────
+        max_boxes: dict[str, int] = {
+            "four_boxes_wide": 4,
+            "four_boxes_stacked": 4,
+            "six_boxes": 6,
+        }
+        if slide.get("layout", layout) in max_boxes and slide.get("boxes"):
+            cap_b = max_boxes[slide["layout"]]
+            if len(slide["boxes"]) > cap_b:
+                slide["boxes"] = slide["boxes"][:cap_b]
+                fixed.append(
+                    f"Capped boxes on slide '{title}' to {cap_b} (overflow guard)"
+                )
+
+        slides_out.append(slide)
+
+    # ── Renumber sequentially ─────────────────────────────────────────────────
+    for i, s in enumerate(slides_out, start=1):
+        s["slide_number"] = i
+
+    if removed or fixed:
+        logger.info(
+            "[validation %s] %d removed, %d fixes; final slide count: %d",
+            context, len(removed), len(fixed), len(slides_out),
+        )
+        for msg in removed[:10]:
+            logger.info("[validation %s] %s", context, msg)
+
+    validated = {**deck_spec, "slides": slides_out}
+    if "metadata" in validated:
+        validated["metadata"] = {
+            **validated["metadata"],
+            "total_slides": len(slides_out),
+        }
+    return validated
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # JSON parsing
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _strip_fences(text: str) -> str:
+    """Strip markdown code fences from an LLM response."""
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\s*```\s*$", "", text, flags=re.MULTILINE)
+    return text.strip()
+
+
+def _is_truncated(text: str) -> bool:
+    """
+    Return True when the LLM response appears to be truncated mid-JSON.
+
+    A complete JSON object must end with '}'.  When max_tokens is hit the
+    response can end mid-string, mid-array, or mid-object.  We detect this
+    by checking whether the stripped text ends with the closing brace of the
+    outermost object.
+    """
+    t = text.strip()
+    return bool(t) and not t.endswith("}")
+
+
+def _repair_truncated_json(text: str) -> str:
+    """
+    Attempt to close a truncated JSON object by appending the right number of
+    closing brackets/braces.
+
+    Strategy:
+      1. Walk the entire string tracking brace/bracket/string depth.
+      2. After the walk, append the necessary closing tokens in reverse order.
+      3. Return the repaired string (may still not be valid — caller tries
+         json.loads and falls back gracefully).
+    """
+    stack: list[str] = []
+    in_string = False
+    escape = False
+
+    for ch in text:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in ("{", "["):
+            stack.append("}" if ch == "{" else "]")
+        elif ch in ("}", "]"):
+            if stack and stack[-1] == ch:
+                stack.pop()
+
+    # Close any unclosed string first
+    suffix = '"' if in_string else ""
+    # Close all open containers in reverse
+    suffix += "".join(reversed(stack))
+    return text + suffix
+
+
+def _continue_truncated_json(partial: str, phase: str) -> str:
+    """
+    Ask Claude to complete a truncated JSON response.
+
+    Sends the last 2000 chars of the partial response as context so Claude can
+    see where it was cut off and produce only the continuation.  Returns the
+    full completed string (partial + continuation).
+    """
+    context_tail = partial[-2000:]
+    continuation_prompt = (
+        "The previous JSON response was cut off due to token limits.\n"
+        "Here is the END of the truncated response:\n\n"
+        f"...{context_tail}\n\n"
+        "Continue the JSON EXACTLY from where it was cut off.\n"
+        "Output ONLY the continuation — do NOT repeat what was already written.\n"
+        "Close all open arrays, objects, and strings.\n"
+        "The final character you output must be the closing } of the root object.\n"
+        "No preamble. No markdown fences. Start immediately with the continuation."
+    )
+    system_prompt = (
+        "You are a JSON completion assistant. "
+        "You receive the tail of a truncated JSON document and output only the continuation "
+        "needed to make it valid. Never repeat already-output content."
+    )
+    logger.warning(
+        "[%s] JSON truncated (%d chars) — requesting continuation from Claude",
+        phase, len(partial),
+    )
+    try:
+        continuation = chat(
+            system=system_prompt,
+            user=continuation_prompt,
+            max_tokens=8192,
+            operation=f"{phase}_continuation",
+        )
+        # Strip any fences Claude might add
+        continuation = _strip_fences(continuation)
+        logger.info(
+            "[%s] Continuation received: %d chars — assembling full response",
+            phase, len(continuation),
+        )
+        return partial + continuation
+    except Exception as exc:
+        logger.error("[%s] Continuation request failed: %s", phase, exc)
+        return partial  # caller will try repair heuristic
+
 
 def _parse_json(raw: str, phase: str) -> dict:
     """
     Robustly extract and parse JSON from an LLM response.
-    Handles clean JSON, fenced JSON, and JSON embedded in prose.
+
+    Handles (in order):
+      1. Clean JSON — direct json.loads
+      2. Fenced JSON (```json ... ```) — strip fences then json.loads
+      3. JSON embedded in prose — extract first {...} block
+      4. Truncated JSON (hit max_tokens) — request continuation from Claude,
+         then re-try steps 1-3 on the completed response
+      5. Structural repair heuristic — close unclosed braces/brackets and retry
     """
-    text = raw.strip()
+    def _attempt(text: str) -> dict | None:
+        """Try to parse text as JSON via direct parse and brace-extraction."""
+        text = _strip_fences(text)
 
-    # Strip markdown code fences
-    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
-    text = re.sub(r"\s*```\s*$", "", text, flags=re.MULTILINE)
-    text = text.strip()
+        # Direct parse
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
 
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+        # Extract first top-level {...} block from mixed prose
+        brace_start = text.find("{")
+        if brace_start != -1:
+            depth = 0
+            in_string = False
+            escape = False
+            for i, ch in enumerate(text[brace_start:], start=brace_start):
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\" and in_string:
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[brace_start: i + 1]
+                        try:
+                            return json.loads(candidate)
+                        except json.JSONDecodeError:
+                            break
+        return None
 
-    # Extract first top-level JSON object from prose
-    brace_start = text.find("{")
-    if brace_start != -1:
-        depth = 0
-        for i, ch in enumerate(text[brace_start:], start=brace_start):
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    candidate = text[brace_start: i + 1]
-                    try:
-                        return json.loads(candidate)
-                    except json.JSONDecodeError:
-                        break
+    # ── Attempt 1: parse as-is ────────────────────────────────────────────
+    result = _attempt(raw)
+    if result is not None:
+        return result
 
-    logger.error("[%s] LLM returned non-JSON. First 400 chars: %.400s", phase, raw)
+    # ── Attempt 2: truncation continuation ────────────────────────────────
+    text_stripped = _strip_fences(raw)
+    if _is_truncated(text_stripped):
+        logger.warning(
+            "[%s] Response appears truncated (%d chars, last char: %r) — "
+            "requesting Claude continuation",
+            phase, len(text_stripped), text_stripped[-1] if text_stripped else "",
+        )
+        completed = _continue_truncated_json(text_stripped, phase)
+        result = _attempt(completed)
+        if result is not None:
+            logger.info("[%s] Continuation strategy succeeded — JSON parsed", phase)
+            return result
+
+        # ── Attempt 3: structural repair on the completed text ─────────────
+        repaired = _repair_truncated_json(completed)
+        result = _attempt(repaired)
+        if result is not None:
+            logger.info("[%s] Repair heuristic succeeded after continuation — JSON parsed", phase)
+            return result
+    else:
+        # Not obviously truncated but still failed — try repair on original
+        repaired = _repair_truncated_json(text_stripped)
+        result = _attempt(repaired)
+        if result is not None:
+            logger.info("[%s] Repair heuristic succeeded — JSON parsed", phase)
+            return result
+
+    logger.error("[%s] All JSON recovery strategies failed. First 400 chars: %.400s", phase, raw)
     raise RuntimeError(
-        f"Phase '{phase}': the AI returned a narrative response instead of JSON. "
-        "Please try again."
+        f"Phase '{phase}': the AI returned a response that could not be parsed as JSON "
+        "after truncation recovery and structural repair. Please try again."
     )
 
 
@@ -920,23 +1682,54 @@ def _build_blueprint_message(
         f"Focus Area: {focus_area}" if focus_area
         else "Scope: Entire workspace — cover all available knowledge"
     )
+    # The generation_prompt file contains the full deliverable methodology (25-27k chars).
+    # It is NOT sent in the user message because:
+    #   1. The system prompt (_BLUEPRINT_SYSTEM_PROMPT) already contains all quality rules,
+    #      layout mandates, bullet quality rules, annotation field requirements, etc.
+    #   2. Embedding a 26k-char file in the user message pushes total input to ~20k tokens,
+    #      which causes consistent 502 Bad Gateway errors on the IBM Gateway under load.
+    #   3. The generation prompt files overlap ~80% with the system prompt content.
+    #
+    # Instead we send a compact deliverable-type summary (~200 chars) that tells Claude
+    # WHAT type of deliverable to produce. The HOW is fully specified in the system prompt.
+    _DELIVERABLE_SUMMARIES = {
+        "client_101": (
+            "DELIVERABLE TYPE: Client 101 — a standardised briefing for a consultant new to "
+            "this client/subject. Cover: overview, business context, key domains, operating "
+            "model, strategic priorities, key challenges, relevant capabilities, ecosystem "
+            "relationships, and implications for IBM. Story arc: orient → understand → "
+            "so-what."
+        ),
+        "client_201": (
+            "DELIVERABLE TYPE: Client 201 — a deep consulting analysis for an experienced "
+            "engagement team. Cover: strategic situation, market forces, competitive dynamics, "
+            "capability assessment, architecture and technology dependencies, risk landscape, "
+            "opportunity sizing, and IBM's recommended approach. Story arc: situation → "
+            "complication → resolution → recommendations."
+        ),
+        "executive_summary": (
+            "DELIVERABLE TYPE: Executive Summary — a focused leadership briefing on the "
+            f"{'focus area: ' + focus_area if focus_area else 'most significant workspace theme'}. "
+            "Cover: the single governing insight, key findings, strategic implications, risks, "
+            "and the recommended next action. Concise: no more than 8–10 content slides."
+        ),
+    }
+    deliverable_summary = _DELIVERABLE_SUMMARIES.get(
+        deliverable_type,
+        f"DELIVERABLE TYPE: {deliverable_type}",
+    )
+
     return (
         f"Workspace: {workspace_name}\n"
         f"{focus_line}\n\n"
+        f"{deliverable_summary}\n\n"
         f"{slide_guidance}\n\n"
-        f"=== DELIVERABLE METHODOLOGY ===\n{generation_prompt}\n\n"
         f"{graph_digest}\n\n"
         f"=== TASK ===\n"
-        f"Using the methodology above and the graph intelligence brief, produce the "
-        f"presentation blueprint JSON now. Ensure:\n"
-        f"  - Governing messages are tight and evidence-grounded\n"
-        f"  - Every slide title is a takeaway statement\n"
-        f"  - Every slide has a stated 'purpose' field — no purpose, no slide\n"
+        f"Produce the presentation blueprint JSON for the deliverable type above. Ensure:\n"
         f"  - Content slide count is {min_s}–{max_s} (target {target_s})\n"
-        f"  - At least 30% of content slides use a non-title_content layout\n"
-        f"  - large_text is used for the single most important insight\n"
-        f"  - section_divider opens every major section\n"
-        f"  - All bullets are complete sentences (never end with ...)\n"
+        f"  - Every content slide populates: key_insights, graph_concepts, relationships_used,\n"
+        f"    patterns_used, evidence (annotation mandate from system prompt)\n"
         f"Output ONLY the JSON object. Start with {{ and end with }}."
     )
 
@@ -983,7 +1776,14 @@ def generate_client_material(
     _root = str(Path(__file__).parent.parent.parent)
     if _root not in _sys.path:
         _sys.path.insert(0, _root)
-    from deliverables.generators.powerpoint_generator import generate_pptx
+    try:
+        from deliverables.generators.powerpoint_generator import generate_pptx
+    except (ImportError, ModuleNotFoundError) as _imp_err:
+        raise RuntimeError(
+            f"PowerPoint generator could not be loaded: {_imp_err}. "
+            "Ensure the deliverables package is installed and the backend is started "
+            "from the project root directory."
+        ) from _imp_err
 
     if deliverable_type not in DELIVERABLE_TYPES:
         raise ValueError(
@@ -1050,7 +1850,7 @@ def generate_client_material(
         raw_blueprint = chat(
             system=_BLUEPRINT_SYSTEM_PROMPT,
             user=blueprint_message,
-            max_tokens=16000,
+            max_tokens=8192,
             operation="deliverable_blueprint",
         )
     except Exception as exc:
@@ -1078,7 +1878,7 @@ def generate_client_material(
         raw_review = chat(
             system=_REVIEW_SYSTEM_PROMPT,
             user=review_message,
-            max_tokens=16000,
+            max_tokens=8192,
             operation="deliverable_review",
         )
     except Exception as exc:
@@ -1116,22 +1916,55 @@ def generate_client_material(
     )
 
     # ═══════════════════════════════════════════════════════════════════════
-    # PHASE 3 — PPTX GENERATION
-    # PowerPoint generator renders the spec to .pptx bytes
+    # PHASE 4 — PRESENTATION REVIEW
+    # Claude acts as consulting manager: removes weak slides, rewrites label
+    # titles, converts bullet-heavy layouts to visual layouts, fixes bullets.
+    # Falls back to original deck_spec on any error.
     # ═══════════════════════════════════════════════════════════════════════
     logger.info(
-        "[deliverable ws=%d type=%s] Phase 3: rendering PPTX",
+        "[deliverable ws=%d type=%s] Phase 4: presentation review",
+        workspace_id, deliverable_type,
+    )
+    deck_spec = _review_deck_spec(
+        deck_spec,
+        context=f"ws={workspace_id} type={deliverable_type}",
+    )
+    logger.info(
+        "[deliverable ws=%d] Phase 4 complete: %d slides after review",
+        workspace_id, len(deck_spec.get("slides", [])),
+    )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # VALIDATION — deterministic pre-render gate
+    # No LLM calls. Removes empty/placeholder slides, fixes bullet termination,
+    # guards against overflow.  Runs after Phase 4 to catch anything missed.
+    # ═══════════════════════════════════════════════════════════════════════
+    deck_spec = _validate_deck_spec(
+        deck_spec,
+        context=f"ws={workspace_id} type={deliverable_type}",
+    )
+    logger.info(
+        "[deliverable ws=%d] Validation complete: %d slides before render",
+        workspace_id, len(deck_spec.get("slides", [])),
+    )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # PHASE 5 — PPTX GENERATION
+    # PowerPoint generator renders the reviewed spec to .pptx bytes
+    # ═══════════════════════════════════════════════════════════════════════
+    logger.info(
+        "[deliverable ws=%d type=%s] Phase 5: rendering PPTX",
         workspace_id, deliverable_type,
     )
 
     try:
         pptx_bytes = generate_pptx(deck_spec, workspace_name)
     except Exception as exc:
-        logger.error("[deliverable ws=%d] Phase 3 (PPTX) failed: %s", workspace_id, exc)
+        logger.error("[deliverable ws=%d] Phase 5 (PPTX) failed: %s", workspace_id, exc)
         raise RuntimeError(f"PowerPoint assembly failed: {exc}") from exc
 
     logger.info(
-        "[deliverable ws=%d] Phase 3 (PPTX) complete: %.1f KB PPTX generated",
+        "[deliverable ws=%d] Phase 5 (PPTX) complete: %.1f KB PPTX generated",
         workspace_id, len(pptx_bytes) / 1024,
     )
 

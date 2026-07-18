@@ -33,7 +33,7 @@ Produce a **summary deck** that: is generated primarily from the **workspace kno
 
 1. **Knowledge-graph-first.** Derive the governing messages from the graph's concepts, relationships, patterns, and evidence — not from raw text and not from the template's page order.
 2. **Bottom line up front.** State the conclusion/recommendation first; then support it. Never make a senior reader hunt for the point.
-3. **Ruthless prioritization.** Identify the few messages that matter (commonly three to five); everything else supports them or moves to an appendix. A summary is defined by what it leaves out.
+3. **Ruthless prioritization.** Identify the few messages that matter; everything else supports them or moves to an appendix. A summary is defined by what it leaves out.
 4. **Synthesis over shrinking.** Do not proportionally miniaturize the source. Cluster detail into themes (MECE) and state each as an **insight**, not a category. Find the through-line.
 5. **Faithful compression.** Summarize without distorting. Never drop a material caveat, risk, or dependency to make the story cleaner. Omission must not mislead.
 6. **Decision orientation.** Make the "so what" and "now what" explicit — implication, recommendation/options, decision required, next steps.
@@ -67,9 +67,41 @@ The workspace provides the source automatically. Synthesize before designing sli
 - **Separate client-facing from internal;** **log gaps, thin areas, and conflicts** for the Open-items list.
 - **Build a canonical term glossary** and use it consistently.
 
-## PHASE 3 — DESIGN THE NARRATIVE (ANSWER-FIRST, FROM THE GRAPH)
+## PHASE 2B — CONSULTING INTELLIGENCE BRIEF (before designing slides)
 
-Draft the storyline as **messages** derived from the graph, using the Pyramid Principle and BLUF. Organize into the following **narrative beats** (describe as sections and flow — **never label them with slide or page numbers**; short summaries collapse several beats together):
+Before deciding on any slides, generate an internal **Consulting Intelligence Brief** from the graph intelligence. This is the consulting interpretation layer — it is not a slide, not a fact list, not a summary. It is the answer to: *what does this body of knowledge mean for a senior decision-maker, and what does it require them to understand or do?*
+
+The brief must include:
+
+- **Key Findings** — the most important things the graph reveals, stated as consulting insights grounded in evidence.
+- **Strategic Implications** — what each finding means for the organization's strategy, priorities, or direction.
+- **Business Impacts** — where value, cost, risk, opportunity, or capability is materially affected.
+- **Risks** — material concerns requiring executive attention.
+- **Opportunities** — where the evidence points to upside, differentiation, or unmet potential.
+- **Recommendations** — the clearest action or decision the evidence supports.
+- **Supporting Evidence** — the specific concepts, relationships, and patterns from the graph that justify each point.
+
+**Slides should be generated from this Consulting Intelligence Brief — not directly from raw graph concepts or relationship lists.**
+
+The workflow is:
+
+```
+Knowledge Graph
+    ↓
+Graph Intelligence
+    ↓
+Consulting Intelligence Brief
+    ↓
+Narrative Design (answer-first)
+    ↓
+Slide Generation
+```
+
+The Executive Summary's purpose is **decision support**, not information coverage. Every slide should help a senior reader understand what matters, why it matters, and what to do about it.
+
+## PHASE 3 — DESIGN THE NARRATIVE (ANSWER-FIRST, FROM THE CONSULTING BRIEF)
+
+Draft the storyline as **messages** derived from the Consulting Intelligence Brief, using the Pyramid Principle and BLUF. Organize into the following **narrative beats** (describe as sections and flow — **never label them with slide or page numbers**; short summaries collapse several beats together):
 
 1. **Cover / framing.** What this summarizes, for whom, as of when; house brand; assured tone.
 2. **The bottom line — the executive summary.** The single most important beat: on its own, it conveys the headline answer/conclusion, the few governing messages, and the recommendation or decision required. The "if you read nothing else" page — self-contained, scannable, quantified where the evidence allows.
@@ -130,6 +162,9 @@ For every section decide four things: **objective** (the one question it answers
 
 - **Bottom line:** the headline answer/recommendation is on the first content page and unmistakable.
 - **Grounding & faithful synthesis:** every point traces to workspace evidence; no material caveat dropped; no fact invented; certainty preserved.
+- **Consulting Intelligence Brief:** findings, implications, risks, opportunities, and recommendations are present in the deck — not just graph facts or concept names.
+- **Client Value Test:** every slide answers "Would a senior executive gain meaningful value from this slide — does it support a decision, surface a risk, identify an opportunity, or communicate a recommendation?" Any slide that fails is rewritten, merged, or removed.
+- **Executive Summary Rule:** this deliverable optimizes for decision support, not information coverage. Every slide helps the reader understand what matters, why it matters, and what to do.
 - **Graph coverage & prioritization:** the most important/connected concepts and key patterns are represented; only the messages that matter are in the main flow; the rest is in the appendix; length target met.
 - **Completeness of the ask:** implications, recommendation/options, decisions required, and next steps are all present and clear.
 - **Template = design only:** structure came from the methodology, not the template; branding matches exactly (fonts, colors, logos, footers, motif, spacing, page numbers).
@@ -178,46 +213,70 @@ Return a JSON object with the following structure:
 
 | Layout key | Use when | Required fields |
 |---|---|---|
-| `title_content` | Narrative slide with 3–7 supporting bullets | `bullets` |
+| `title_content` | Narrative slide with supporting bullets | `bullets` |
 | `section_divider` | Opens every major section (no body) | — |
-| `large_text` | The deck's SINGLE most important insight — full-slide statement | `title` is the statement |
-| `callout_stat` | 2–3 metric / KPI lines | `bullets` (2–3 stats) |
-| `data_2_callouts` | Exactly 2 headline metrics with supporting context | `stats`: `[{"label":"VALUE","body":"context"}]` |
-| `two_column` | 6–10 parallel items split evenly left/right | `bullets` (flat list) |
+| `large_text` | The deck's single most important insight — full-slide statement | `title` is the statement |
+| `callout_stat` | Key metric or KPI lines | `bullets` |
+| `data_2_callouts` | Two headline metrics with supporting context | `stats`: `[{"label":"VALUE","body":"context"}]` |
+| `two_column` | Many parallel items split evenly left/right | `bullets` (flat list) |
 | `two_col_dividers` | Current State / Target State or any comparison | `col_heads`, `columns` |
-| `four_column` | 4 parallel themes / workstreams / dimensions | `columns` (4 lists) |
-| `four_column_headlines` | 3 parallel themes with named headings | `col_heads` (3), `columns` (3 lists) |
-| `four_boxes_wide` | Exactly 4 key findings / recommendations | `boxes` (4 items) |
-| `four_boxes_stacked` | Exactly 4 items in a 2×2 grid (risk / opportunity quadrants) | `boxes` (4 items) |
-| `six_boxes` | 5–6 themes / evidence points / components | `boxes` (5–6 items) |
+| `four_column` | Four parallel themes / workstreams / dimensions | `columns` (4 lists) |
+| `four_column_headlines` | Three parallel themes with named headings | `col_heads` (3), `columns` (3 lists) |
+| `four_boxes_wide` | Four key findings / recommendations | `boxes` (4 items) |
+| `four_boxes_stacked` | Four items in a 2×2 grid (risk / opportunity quadrants) | `boxes` (4 items) |
+| `six_boxes` | Five or six themes / evidence points / components | `boxes` (5–6 items) |
 
 ### Slide quality rules — every slide must satisfy ALL of these before it is included:
 
-1. **EVIDENCE**: title or at least one bullet names a specific concept, entity, or pattern from the workspace graph. Floating, ungrounded slides are not permitted.
-2. **SUBSTANCE**: at least 3 complete bullets or 3 box/column items. Exception: `large_text`, `section_divider`, `data_2_callouts`, `callout_stat`.
-3. **TAKEAWAY TITLE**: title states a conclusion or finding — never a category label ("Key Findings", "Overview", "Background", "Conclusion", "Recommendations").
-4. **UNIQUENESS**: slide covers a topic not already covered by another slide. Duplicates must be merged.
+1. **EVIDENCE**: the slide title or its content names a specific concept, entity, finding, or pattern from the workspace graph. Floating, ungrounded slides are not permitted.
 
-If a proposed slide cannot satisfy all four rules, merge it or drop it. Do not include it.
+2. **SUBSTANCE**: the slide contains enough content to communicate its purpose to a senior audience. Supporting content may include findings, implications, evidence, recommendations, decisions, risks, or opportunities. The amount of content should be determined by available evidence, the chosen layout, and the message — not by arbitrary quotas.
+
+3. **TAKEAWAY TITLE**: the title states a conclusion, finding, or recommendation — never a category label ("Key Findings", "Overview", "Background", "Conclusion", "Recommendations", "Next Steps"). The title must stand alone and be understood without reading the body.
+
+4. **UNIQUENESS**: the slide covers a topic not already covered by another slide. Duplicates must be merged.
+
+5. **EXECUTIVE VALUE**: before including a slide, ask: *"Would a senior executive — decision-maker, sponsor, or approver — gain meaningful value from this slide? Does it support a decision, surface a risk, identify an opportunity, or communicate a recommendation?"* If the answer is no, rewrite it, merge it, or remove it. The Executive Summary is defined by its ruthless prioritization — every slide must earn its place.
+
+If a proposed slide cannot satisfy all five rules, merge it or drop it. Do not include it.
+
+### Executive decision-support gate — every slide must answer at least one:
+
+- What is the most important thing the reader should know?
+- What decision does this inform?
+- What risk should the reader be aware of?
+- What opportunity should the reader act on?
+- What recommendation does the evidence support?
+- What is required from the audience (decision, approval, resource)?
+
+If none of these apply: the slide does not belong in an executive summary. Remove it.
 
 ### Bullet rules — every bullet must satisfy ALL of these:
 
 - Is a **complete grammatical sentence** (subject + verb + complement)
-- **Ends with a period** — never with `...` or `…`
-- Is **20–100 characters** — split longer sentences
-- **Names a specific entity, concept, or finding** from the workspace
-- Uses **active voice** — leads with the insight or action
+- **Ends with a period** — never with `...` or `…` or a dangling clause
+- Is **specific** — names an entity, concept, finding, or metric from the workspace
+- Uses **active voice** — leads with the insight or conclusion, not vague filler ("This shows...", "It is important...", "There are several...", "Various factors...")
 
-### Visual-first requirement:
+The length and number of bullets should be determined by the slide's purpose, the available evidence, and the chosen layout. Do not apply fixed bullet counts.
 
-At least **40%** of content slides must use a layout other than `title_content`.
-Use `large_text` exactly **once** per deck for the single governing bottom-line insight.
-Use `four_boxes_wide` or `four_boxes_stacked` when content is exactly 4 items.
-Use `data_2_callouts` or `callout_stat` for metrics and KPIs.
-Use `two_col_dividers` for any comparison, gap, or current/target analysis.
+### Visual-first guidance:
+
+Prefer structured layouts over plain bullet slides wherever the content permits. Select the layout that best matches the nature of the content:
+
+- Findings or priorities that cluster into four groups → `four_boxes_wide` or `four_boxes_stacked`
+- Five or six themes or evidence points → `six_boxes`
+- A comparison, recommendation vs. alternative, current/target, or gap analysis → `two_col_dividers`
+- Four parallel themes or workstreams → `four_column`
+- Three parallel themes with headings → `four_column_headlines`
+- Two headline metrics or decision-critical KPIs → `data_2_callouts`
+- The single governing bottom-line insight → `large_text` (use once)
+- Many parallel items → `two_column`
+
+Use `title_content` when none of the above layouts suit the content, not as the default choice. An Executive Summary should favor high-signal visual layouts that communicate findings clearly to a reader who may only glance at each slide.
 
 ### Slide count rule:
 
-The system message contains a calibrated TARGET and RANGE. TARGET is the recommendation; RANGE is the hard floor/ceiling. Content slides = all slides except `section_divider`, `cover`, `sources`, `end_slide`. Executive Summary is concise by design — every slide must earn its place. Prefer one sharp synthesis slide over two that repeat the same theme.
+The system message contains a calibrated TARGET and RANGE. TARGET is the recommendation; RANGE is the hard floor/ceiling. Content slides = all slides except `section_divider`, `cover`, `sources`, `end_slide`. Executive Summary is concise by design — every slide must earn its place. Prefer one sharp synthesis slide over two that repeat the same theme. The purpose of this deliverable is not to cover everything — it is to communicate what matters most.
 
 Return ONLY valid JSON. Do not wrap in markdown fences. Start with `{` and end with `}`.

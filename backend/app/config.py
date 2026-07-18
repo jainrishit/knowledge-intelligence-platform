@@ -34,8 +34,13 @@ class Settings(BaseSettings):
 
     # Graph traversal
     graph_hop_depth: int = Field(default=2, alias="GRAPH_HOP_DEPTH")
-    graph_strength_threshold: float = Field(default=0.5, alias="GRAPH_STRENGTH_THRESHOLD")
-    graph_max_nodes: int = Field(default=60, alias="GRAPH_MAX_NODES")
+    # Lower threshold to 0.35 — matches the relationship extraction STRENGTH_FLOOR so that
+    # every stored relationship participates in retrieval BFS (previously 0.5 cut out ~30%
+    # of extracted relationships, making the graph appear sparser than it really was).
+    graph_strength_threshold: float = Field(default=0.35, alias="GRAPH_STRENGTH_THRESHOLD")
+    # Raised from 60 to 100 — gives BFS more room to explore without context explosion.
+    # The retrieval layer still de-ranks low-relevance nodes before sending to the LLM.
+    graph_max_nodes: int = Field(default=100, alias="GRAPH_MAX_NODES")
 
     # Extraction quality
     concept_confidence_min: float = Field(default=0.6, alias="CONCEPT_CONFIDENCE_MIN")
@@ -45,8 +50,9 @@ class Settings(BaseSettings):
         default=10.0, alias="PATTERN_EXTRACTION_THRESHOLD_PERCENT"
     )
 
-    # QA retrieval
-    qa_top_k: int = Field(default=20, alias="QA_TOP_K")
+    # QA retrieval — raised from 20 to 30 seed nodes so BFS starts from a richer
+    # set of entry points, improving coverage of relevant concepts in the graph.
+    qa_top_k: int = Field(default=30, alias="QA_TOP_K")
 
     # LLM governance — circuit breaker
     llm_cb_failure_threshold: int = Field(default=5, alias="LLM_CB_FAILURE_THRESHOLD")
@@ -61,13 +67,20 @@ class Settings(BaseSettings):
     llm_cost_per_1k_output_tokens: float = Field(default=0.015, alias="LLM_COST_PER_1K_OUTPUT_TOKENS")
 
     # LLM resilience — timeouts (seconds)
+    # read_timeout raised to 180s: a blueprint generation at max_tokens=8192 observed
+    # 118.7s latency from the IBM Gateway.  120s left only 1.3s of margin.
+    # 180s provides a 60s safety buffer while still guaranteeing a timeout eventually.
     llm_connect_timeout: float = Field(default=10.0, alias="LLM_CONNECT_TIMEOUT")
-    llm_read_timeout: float = Field(default=120.0, alias="LLM_READ_TIMEOUT")
+    llm_read_timeout: float = Field(default=180.0, alias="LLM_READ_TIMEOUT")
     llm_write_timeout: float = Field(default=30.0, alias="LLM_WRITE_TIMEOUT")
 
     # LLM resilience — retry strategy
-    llm_max_retries: int = Field(default=4, alias="LLM_MAX_RETRIES")
-    llm_retry_max_wait: float = Field(default=30.0, alias="LLM_RETRY_MAX_WAIT")
+    # max_retries=1: one retry after the initial attempt (2 total attempts).
+    # Rationale: read_timeout=180s means max_retries=2 produces a 3×180=540s worst case.
+    # With max_retries=1: worst case = 2×180s + ~5s backoff = ~365s (~6 min).
+    # One retry is enough to recover from a transient 502; more retries just extend the hang.
+    llm_max_retries: int = Field(default=1, alias="LLM_MAX_RETRIES")
+    llm_retry_max_wait: float = Field(default=8.0, alias="LLM_RETRY_MAX_WAIT")
 
     # Server
     cors_origins: str = Field(

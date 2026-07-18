@@ -4,10 +4,22 @@ Concept extraction agent.
 Extracts named concepts from document text using the ICA LLM client.
 Concepts below the CONCEPT_CONFIDENCE_MIN threshold are discarded.
 Uses hierarchical chunking with overlap so no context is lost at chunk boundaries.
+
+Performance notes
+-----------------
+• extract_concepts_from_chunks() is the primary entry point.  The pipeline
+  passes pre-computed chunks so text is never chunked twice.
+• Per-chunk LLM calls are dispatched concurrently via ThreadPoolExecutor
+  (bounded at MAX_CONCURRENT_CHUNK_CALLS workers) so that a 10-chunk
+  document does not wait for 10 sequential network round-trips.
+• extract_concepts() is kept for backward compatibility with tests / callers
+  that do not yet pass chunks explicitly.
 """
 from __future__ import annotations
 import json
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -19,6 +31,10 @@ from app.ingestion.parsers import chunk_text_hierarchical
 from app.llm_client import chat
 
 logger = logging.getLogger(__name__)
+
+# Maximum concurrent LLM calls per document.
+# 8 workers processes a 12-chunk document in ~2 batches, saving round-trip waits.
+MAX_CONCURRENT_CHUNK_CALLS = 8
 
 CONCEPT_SYSTEM_PROMPT = """\
 You are an AI knowledge compiler for IBM Consulting.
@@ -82,7 +98,10 @@ def _call_llm(text_chunk: str) -> list[dict[str, Any]]:
             raw = chat(
                 system=CONCEPT_SYSTEM_PROMPT,
                 user=f"Document text:\n\n{text_chunk}",
-                max_tokens=4096,
+                # 8192 — raised from 4096; large PPTX chunks with 20+ concepts
+                # each having description + source_excerpt were truncating JSON.
+                max_tokens=8192,
+                operation="concept_extraction",
             )
             raw = raw.strip()
             if raw.startswith("```"):
@@ -99,31 +118,62 @@ def _call_llm(text_chunk: str) -> list[dict[str, Any]]:
     return []
 
 
-def extract_concepts(db: Session, doc: Document) -> list[Concept]:
+def extract_concepts_from_chunks(
+    db: Session,
+    doc: Document,
+    chunks: list[str],
+) -> list[Concept]:
     """
-    Extract concepts from doc.raw_text and persist to DB.
-    Uses hierarchical chunking with overlap; filters by confidence threshold.
+    Extract concepts from pre-computed chunks and persist to DB.
+
+    Dispatches per-chunk LLM calls concurrently (up to MAX_CONCURRENT_CHUNK_CALLS)
+    so that a multi-chunk document does not wait for chunks sequentially.
     """
-    if not doc.raw_text or len(doc.raw_text.strip()) < 100:
-        logger.info("[doc=%d] Text too short for concept extraction, skipping.", doc.id)
+    if not chunks:
+        logger.info("[doc=%d] No chunks provided for concept extraction, skipping.", doc.id)
         return []
 
-    chunks = chunk_text_hierarchical(
-        doc.raw_text,
-        max_chars=settings.chunk_size * 4,
-        overlap_chars=settings.chunk_overlap,
-    )
-
-    created: list[Concept] = []
-    seen_names: set[str] = set()
-
-    existing_names = {
+    existing_names: set[str] = {
         c.name.lower()
         for c in db.query(Concept).filter(Concept.workspace_id == doc.workspace_id).all()
     }
 
-    for chunk in chunks:
-        raw_items = _call_llm(chunk)
+    # ── Dispatch LLM calls concurrently ──────────────────────────────────────
+    t0 = time.monotonic()
+    raw_results: list[list[dict[str, Any]]] = [[] for _ in chunks]
+    first_exception: Exception | None = None
+
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHUNK_CALLS) as executor:
+        future_to_idx = {executor.submit(_call_llm, chunk): i for i, chunk in enumerate(chunks)}
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                raw_results[idx] = future.result()
+            except Exception as exc:
+                logger.warning("[doc=%d] Chunk %d concept extraction failed: %s", doc.id, idx, exc)
+                raw_results[idx] = []
+                if first_exception is None:
+                    first_exception = exc
+
+    # Log the first chunk failure but continue — partial extraction is better
+    # than marking the whole document failed because one chunk timed out.
+    if first_exception is not None:
+        logger.warning(
+            "[doc=%d] %d chunk(s) failed during concept extraction (first error: %s). "
+            "Proceeding with results from successful chunks.",
+            doc.id, sum(1 for r in raw_results if not r), first_exception,
+        )
+
+    logger.info(
+        "[doc=%d] Concept LLM calls: %d chunks completed in %.0fms",
+        doc.id, len(chunks), (time.monotonic() - t0) * 1000,
+    )
+
+    # ── Merge results — deduplicate across chunks ─────────────────────────────
+    created: list[Concept] = []
+    seen_names: set[str] = set()
+
+    for raw_items in raw_results:
         for raw in raw_items:
             try:
                 item = ConceptItem(**raw)
@@ -157,5 +207,28 @@ def extract_concepts(db: Session, doc: Document) -> list[Concept]:
             created.append(concept)
 
     db.commit()
-    logger.info("[doc=%d] Extracted %d concepts (confidence ≥ %.2f).", doc.id, len(created), settings.concept_confidence_min)
+    logger.info(
+        "[doc=%d] Extracted %d concepts (confidence ≥ %.2f) from %d chunks.",
+        doc.id, len(created), settings.concept_confidence_min, len(chunks),
+    )
     return created
+
+
+def extract_concepts(db: Session, doc: Document) -> list[Concept]:
+    """
+    Backward-compatible entry point — chunks the document text internally
+    and delegates to extract_concepts_from_chunks().
+
+    Prefer calling extract_concepts_from_chunks() directly from the pipeline
+    so that chunking only happens once per document.
+    """
+    if not doc.raw_text or len(doc.raw_text.strip()) < 100:
+        logger.info("[doc=%d] Text too short for concept extraction, skipping.", doc.id)
+        return []
+
+    chunks = chunk_text_hierarchical(
+        doc.raw_text,
+        max_chars=settings.chunk_size * 4,
+        overlap_chars=settings.chunk_overlap,
+    )
+    return extract_concepts_from_chunks(db, doc, chunks)

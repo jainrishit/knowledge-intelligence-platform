@@ -464,9 +464,13 @@ class TestPipelineRouting:
             db.commit()
 
             from app.ingestion.pipeline import _run_spreadsheet_pipeline
+            from app.db.models import IngestionAudit
+            audit = IngestionAudit(workspace_id=doc.workspace_id, document_id=doc.id, status="processing")
+            db.add(audit)
+            db.commit()
             with patch("app.extraction.spreadsheet_concept_agent.chat", return_value="[]"), \
                  patch("app.extraction.relationship_agent.chat", return_value="[]"):
-                _run_spreadsheet_pipeline(db, doc)
+                _run_spreadsheet_pipeline(db, doc, audit)
 
             db.refresh(doc)
             assert doc.raw_text is not None

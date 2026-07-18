@@ -1,6 +1,6 @@
-# ADR: Payments Center Brain
+# Payments Center Brain
 
-**Status:** not implemented   
+**Status:** Proposed — not implemented  
 
 ---
 

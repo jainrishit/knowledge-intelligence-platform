@@ -298,9 +298,9 @@ def test_context_ordering_stable_for_equal_scores():
 # QA_TOP_K CONFIG
 # ══════════════════════════════════════════════════════════════════════
 
-def test_top_k_default_is_20():
+def test_top_k_default_is_30():
     from app.config import settings
-    assert settings.qa_top_k == 20, "Default qa_top_k must be 20"
+    assert settings.qa_top_k == 30, "Default qa_top_k must be 30"
 
 
 def test_find_nodes_semantic_respects_top_k():
@@ -501,3 +501,136 @@ def test_rephrased_question_returns_overlapping_sources(mock_concept, mock_rel, 
         if tmp_path:
             os.unlink(tmp_path)
         _teardown(engine)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# _chunk_concept_list — unit tests
+# ══════════════════════════════════════════════════════════════════════
+
+def test_chunk_concept_list_returns_only_chunk_concepts_plus_anchors():
+    """
+    _chunk_concept_list should include concepts whose names appear in the chunk
+    text and always include the top-confidence anchors.
+    """
+    from unittest.mock import MagicMock
+    from app.extraction.relationship_agent import _chunk_concept_list
+
+    def _mc_c(name, conf):
+        c = MagicMock()
+        c.name = name
+        c.type = "General"
+        c.confidence = conf
+        return c
+
+    # 20 concepts; only 3 appear in the chunk
+    concepts = [_mc_c(f"Concept_{i}", 0.6 + i * 0.01) for i in range(20)]
+    # Make the top-3 by confidence have names matching chunk text
+    high_conf = [_mc_c("ISO 20022", 0.99), _mc_c("SWIFT", 0.98), _mc_c("Ripple", 0.97)]
+    all_concepts = high_conf + concepts
+
+    chunk = "ISO 20022 mandates are driving SWIFT migration."
+
+    text, filtered = _chunk_concept_list(all_concepts, chunk)
+
+    names = {c.name for c in filtered}
+    # ISO 20022 and SWIFT appear in chunk → must be included
+    assert "ISO 20022" in names
+    assert "SWIFT" in names
+    # Ripple is a high-confidence anchor → must be included even though not in chunk
+    assert "Ripple" in names
+    # Generic low-confidence non-matching concepts should be excluded
+    unrelated_in_filtered = [c for c in filtered if c.name.startswith("Concept_")]
+    # Anchors are top-10, and we only have 3 named anchors + 20 generic ones,
+    # so up to 7 generic ones may appear as anchors — but the list is capped at 40
+    assert len(filtered) <= 40
+
+
+def test_chunk_concept_list_fallback_for_tiny_workspace():
+    """When fewer than 5 concepts match, all concepts are returned (fallback)."""
+    from unittest.mock import MagicMock
+    from app.extraction.relationship_agent import _chunk_concept_list
+
+    def _mc_c(name, conf):
+        c = MagicMock()
+        c.name = name
+        c.type = "General"
+        c.confidence = conf
+        return c
+
+    concepts = [_mc_c(f"XYZ_{i}", 0.7) for i in range(3)]
+    chunk = "A completely unrelated piece of text with no concept names."
+    text, filtered = _chunk_concept_list(concepts, chunk)
+    # With only 3 concepts total, fallback applies — all 3 returned
+    assert len(filtered) == 3
+
+
+def test_chunk_concept_list_cap():
+    """_chunk_concept_list never returns more than MAX_CONCEPTS_PER_CHUNK (40)."""
+    from unittest.mock import MagicMock
+    from app.extraction.relationship_agent import _chunk_concept_list
+
+    def _mc_c(name, conf):
+        c = MagicMock()
+        c.name = name
+        c.type = "General"
+        c.confidence = conf
+        return c
+
+    # 100 concepts, all matching the chunk
+    concepts = [_mc_c(f"concept {i}", 0.8) for i in range(100)]
+    chunk = " ".join(f"concept {i}" for i in range(100))
+    _, filtered = _chunk_concept_list(concepts, chunk)
+    assert len(filtered) <= 40
+
+
+def test_chunk_concept_list_text_has_concept_names():
+    """The returned text must contain the concept names."""
+    from unittest.mock import MagicMock
+    from app.extraction.relationship_agent import _chunk_concept_list
+
+    def _mc_c(name, conf):
+        c = MagicMock()
+        c.name = name
+        c.type = "Technology"
+        c.confidence = conf
+        return c
+
+    concepts = [_mc_c("ISO 20022", 0.95), _mc_c("CBDC", 0.90)]
+    chunk = "ISO 20022 and CBDC are reshaping payment infrastructure."
+    text, _ = _chunk_concept_list(concepts, chunk)
+    assert "ISO 20022" in text
+    assert "CBDC" in text
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Precision filter — non-seed score floor
+# ══════════════════════════════════════════════════════════════════════
+
+def test_precision_filter_constants_present():
+    """
+    The QA pipeline must define _MIN_NONSEED_SCORE and _MAX_CONTEXT_CONCEPTS
+    as local constants (confirming the precision filter is in place).
+    """
+    import inspect
+    from app.retrieval import qa_service
+    src = inspect.getsource(qa_service.ask_workspace)
+    assert "_MIN_NONSEED_SCORE" in src, (
+        "_MIN_NONSEED_SCORE constant missing from ask_workspace — precision filter removed?"
+    )
+    assert "_MAX_CONTEXT_CONCEPTS" in src, (
+        "_MAX_CONTEXT_CONCEPTS constant missing from ask_workspace — hard cap removed?"
+    )
+
+
+def test_graph_strength_threshold_matches_extraction_floor():
+    """
+    graph_strength_threshold must be ≤ STRENGTH_FLOOR so every extracted
+    relationship participates in retrieval BFS.
+    """
+    from app.config import settings
+    from app.extraction.relationship_agent import STRENGTH_FLOOR
+    assert settings.graph_strength_threshold <= STRENGTH_FLOOR, (
+        f"graph_strength_threshold={settings.graph_strength_threshold} "
+        f"> STRENGTH_FLOOR={STRENGTH_FLOOR} — extracted relationships are silently "
+        f"excluded from BFS traversal."
+    )

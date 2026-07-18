@@ -7,7 +7,7 @@ from datetime import datetime
 from pydantic import ValidationError
 
 from app.schemas import (
-    AskResponse, SourceRef, DeliverableCreate, DeliverableResponse,
+    AskResponse, SourceRef, DeliverableCreate, DeliverablePptxResponse,
     DeliverableOut, ConceptOut, RelationshipOut, WorkspaceCreate,
     WorkspaceOut, DocumentOut, AskRequest, ChatMessageOut,
     ConsultingPatternOut, GraphNode, GraphEdge, GraphOut,
@@ -128,20 +128,19 @@ def test_ask_request_empty_rejected():
 # ══════════════════════════════════════════════════════════════════════
 
 def test_deliverable_create_all_valid_types():
-    for t in ["POV", "executive_summary", "roadmap"]:
+    for t in ["client_101", "client_201", "executive_summary"]:
         d = DeliverableCreate(type=t)
         assert d.type == t
 
 
 def test_deliverable_create_rejects_invalid_type():
     with pytest.raises(ValidationError):
-        DeliverableCreate(type="press_release")
+        DeliverableCreate(type="POV")
 
 
 def test_deliverable_create_optional_fields():
-    d = DeliverableCreate(type="POV")
-    assert d.topic is None
-    assert d.audience is None
+    d = DeliverableCreate(type="client_101")
+    assert d.focus_area is None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -298,5 +297,5 @@ def test_deliverable_response_with_sources():
         created_at=datetime.utcnow(),
     )
     src = SourceRef(document_id=1, document_name="doc.pdf", excerpt="excerpt")
-    resp = DeliverableResponse(deliverable=d, sources=[src])
+    resp = DeliverablePptxResponse(deliverable=d, sources=[src])
     assert len(resp.sources) == 1

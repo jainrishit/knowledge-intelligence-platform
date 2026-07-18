@@ -236,7 +236,7 @@ class TestTimeoutConfiguration:
         created_timeouts: list[httpx.Timeout] = []
 
         class FakeAnthropic:
-            def __init__(self, api_key, base_url, timeout):
+            def __init__(self, api_key, base_url, timeout, **kwargs):
                 created_timeouts.append(timeout)
 
         with patch("app.llm_client.anthropic.Anthropic", FakeAnthropic):
@@ -493,17 +493,22 @@ class TestResilienceSettings:
         assert settings.llm_connect_timeout == 10.0
 
     def test_default_read_timeout(self):
+        # Raised from 120s → 180s: blueprint generation observed 118.7s latency from
+        # the IBM Gateway; 120s left only 1.3s margin and risked spurious timeouts.
         from app.config import settings
-        assert settings.llm_read_timeout == 120.0
+        assert settings.llm_read_timeout == 180.0
 
     def test_default_write_timeout(self):
         from app.config import settings
         assert settings.llm_write_timeout == 30.0
 
     def test_default_max_retries(self):
+        # Reduced 4→2→1: each retry = 1 full read_timeout (180s). With max_retries=1,
+        # worst-case wait is 2×180s=360s. With max_retries=2 it was 540s.
         from app.config import settings
-        assert settings.llm_max_retries == 4
+        assert settings.llm_max_retries == 1
 
     def test_default_retry_max_wait(self):
+        # Reduced 30→8s to limit backoff wait on gateway 502 storms.
         from app.config import settings
-        assert settings.llm_retry_max_wait == 30.0
+        assert settings.llm_retry_max_wait == 8.0

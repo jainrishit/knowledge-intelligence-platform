@@ -295,17 +295,38 @@ def test_delete_one_workspace_does_not_affect_others():
 # DELIVERABLE UNDER LOAD
 # ══════════════════════════════════════════════════════════════════════
 
-@patch("app.generation.deliverable_service.chat", return_value="## POV\n\nContent. [Source: bulk.pdf]")
-@patch("app.generation.deliverable_service._extract_keywords_llm", return_value=["Concept 0"])
-def test_generate_multiple_deliverables_same_workspace(mock_kw, mock_chat):
+@patch("app.api.deliverables.generate_client_material")
+def test_generate_multiple_deliverables_same_workspace(mock_gen):
     """Three deliverables on the same workspace — all stored independently."""
+    from app.db.models import Deliverable as DeliverableModel
+    from app.schemas import DeliverableOut, DeliverablePptxResponse, SourceRef
+    from datetime import datetime, timezone
+
     ws_id = _seed_workspace_with_concepts(20)
+    fake_bytes = b"PK\x03\x04" + b"\x00" * 256
+
     ids = set()
-    for dtype in ["POV", "executive_summary", "roadmap"]:
-        resp = stress_client.post(f"/workspaces/{ws_id}/deliverables",
-                                  json={"type": dtype, "topic": "payments"})
-        assert resp.status_code == 201
-        ids.add(resp.json()["deliverable"]["id"])
+    for dtype in ["client_101", "client_201", "executive_summary"]:
+        db = StressSessionLocal()
+        d = DeliverableModel(
+            workspace_id=ws_id, type=dtype, title=f"Mock {dtype}",
+            content_markdown=None, source_concept_ids=[], source_document_ids=[],
+        )
+        db.add(d)
+        db.commit()
+        db.refresh(d)
+        mock_gen.return_value = DeliverablePptxResponse(
+            deliverable=DeliverableOut.model_validate(d),
+            sources=[SourceRef(document_id=1, document_name="bulk.pdf", excerpt="mock")],
+            pptx_bytes=fake_bytes,
+            filename=f"{dtype}.pptx",
+        )
+        db.close()
+
+        resp = stress_client.post(f"/workspaces/{ws_id}/deliverables", json={"type": dtype})
+        assert resp.status_code == 201, f"{dtype} failed: {resp.text}"
+        ids.add(int(resp.headers.get("X-Deliverable-Id", "0")))
+
     assert len(ids) == 3  # three distinct deliverables
 
     listed = stress_client.get(f"/workspaces/{ws_id}/deliverables").json()

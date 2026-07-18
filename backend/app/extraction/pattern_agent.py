@@ -60,7 +60,9 @@ def _call_llm(context_text: str) -> list[dict[str, Any]]:
             raw = chat(
                 system=PATTERN_SYSTEM_PROMPT,
                 user=context_text,
-                max_tokens=4096,
+                # 8192 — raised from 4096; workspace pattern context can be large
+                # and was truncating the JSON array of patterns mid-object.
+                max_tokens=8192,
             )
             raw = raw.strip()
             if raw.startswith("```"):
@@ -77,11 +79,19 @@ def _call_llm(context_text: str) -> list[dict[str, Any]]:
     return []
 
 
+# Cap lines sent to LLM to keep context bounded on large workspaces.
+# The LLM receives the most recent / most central concepts; older ones are less
+# likely to generate novel patterns.
+_MAX_CONCEPT_LINES  = 120
+_MAX_REL_LINES      = 200
+
+
 def extract_patterns(db: Session, doc: Document) -> list[ConsultingPattern]:
     """Extract consulting patterns for the workspace after document ingestion."""
     all_concepts = (
         db.query(Concept)
         .filter(Concept.workspace_id == doc.workspace_id)
+        .order_by(Concept.id.desc())   # most recent first
         .all()
     )
     if not all_concepts:
@@ -90,13 +100,18 @@ def extract_patterns(db: Session, doc: Document) -> list[ConsultingPattern]:
     all_relationships = (
         db.query(Relationship)
         .filter(Relationship.workspace_id == doc.workspace_id)
+        .order_by(Relationship.strength.desc())   # strongest first
         .all()
     )
 
-    concept_lines = [f"- {c.name} ({c.type}): {c.description}" for c in all_concepts]
-    rel_lines = []
+    # Cap to avoid unbounded context on large workspaces
+    concept_lines = [
+        f"- {c.name} ({c.type}): {c.description}"
+        for c in all_concepts[:_MAX_CONCEPT_LINES]
+    ]
     concept_id_to_name = {c.id: c.name for c in all_concepts}
-    for r in all_relationships:
+    rel_lines = []
+    for r in all_relationships[:_MAX_REL_LINES]:
         src = concept_id_to_name.get(r.source_concept_id, "?")
         tgt = concept_id_to_name.get(r.target_concept_id, "?")
         rel_lines.append(f"- {src} {r.relationship_type} {tgt}")
@@ -109,6 +124,9 @@ def extract_patterns(db: Session, doc: Document) -> list[ConsultingPattern]:
 
     raw_items = _call_llm(context)
     name_to_concept = {c.name.lower(): c for c in all_concepts}
+    # Pre-compute the keys list once — fuzzy_process.extractOne() would otherwise
+    # call list() on the dict keys on every single concept name lookup.
+    concept_name_keys = list(name_to_concept.keys())
     created: list[ConsultingPattern] = []
 
     for raw in raw_items:
@@ -123,7 +141,7 @@ def extract_patterns(db: Session, doc: Document) -> list[ConsultingPattern]:
 
         related_ids: list[int] = []
         for cname in item.related_concept_names:
-            result = fuzzy_process.extractOne(cname.lower(), list(name_to_concept.keys()))
+            result = fuzzy_process.extractOne(cname.lower(), concept_name_keys)
             if result and result[1] >= 70:
                 related_ids.append(name_to_concept[result[0]].id)
 

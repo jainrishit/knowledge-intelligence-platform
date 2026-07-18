@@ -315,8 +315,10 @@ function EdgeInfoPanel({
 }) {
   const src = nodeMap.get(edge.source);
   const tgt = nodeMap.get(edge.target);
-  const strength: number = (edge.data as Record<string, unknown>)?.strength as number ?? 0.7;
-  const relType = (edge.data as Record<string, unknown>)?.relationship_type as string ?? edge.label ?? 'related_to';
+  const edgeData = edge.data as Record<string, unknown>;
+  const strength: number = edgeData?.strength as number ?? 0.7;
+  const relType = edgeData?.relationship_type as string ?? edge.label ?? 'related_to';
+  const reasoning = edgeData?.reasoning as string | null ?? null;
 
   return (
     <div className="flex flex-col h-full">
@@ -352,6 +354,12 @@ function EdgeInfoPanel({
                               'Implied or briefly mentioned.'}
         </p>
       </div>
+      {reasoning && (
+        <div className="px-5 py-4 border-b">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Evidence basis</p>
+          <p className="text-xs text-foreground/80 leading-relaxed italic">"{reasoning}"</p>
+        </div>
+      )}
       <div className="px-5 py-4">
         <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Ask the assistant</p>
         <button
@@ -556,12 +564,22 @@ function ConceptDetailPanel({
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-medium text-foreground leading-tight">{n.name}</p>
                     {n.type && <p className="text-[10px] mt-0.5" style={{ color: nCol.text }}>{n.type}</p>}
+                    {edge?.reasoning && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5 italic line-clamp-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {edge.reasoning}
+                      </p>
+                    )}
                   </div>
                   {edge && (
                     <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
                       <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded font-mono opacity-70 group-hover:opacity-100">
                         {edge.relationship_type.replace(/_/g, ' ')}
                       </span>
+                      {edge.strength !== undefined && (
+                        <span className="text-[9px] text-muted-foreground/60 tabular-nums">
+                          {Math.round(edge.strength * 100)}%
+                        </span>
+                      )}
                     </div>
                   )}
                   <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0 mt-0.5 opacity-0 group-hover:opacity-100" />
