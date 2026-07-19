@@ -450,10 +450,16 @@ def generate_plan(
         phase="plan_blueprint", operation="plan_blueprint", max_tokens=16000,
     )
     _claude_elapsed = time.perf_counter() - _t
-    if blueprint is None:
+    # 0-slide guard: a None reply OR a parseable-but-empty reply ({}, a missing
+    # "slides" field, or an empty slides array) must never be persisted as a
+    # 0-slide plan. Any of these degrades to the deterministic graph-grounded
+    # fallback, which always contains slides. (Preserves all prior fallback
+    # behaviour; only widens the trigger.)
+    if not isinstance(blueprint, dict) or not blueprint.get("slides"):
         logger.error(
-            "[plan ws=%d] blueprint JSON unparseable after corrective retry — "
-            "using deterministic graph-grounded fallback (no 500).", workspace_id)
+            "[plan ws=%d] blueprint missing or empty (None / {} / 0 slides) after "
+            "corrective retry — using deterministic graph-grounded fallback "
+            "(no HTTP 500, no 0-slide plan).", workspace_id)
         blueprint = _fallback_blueprint(
             db, workspace_id, deliverable_type, concept_ids, source_refs
         )
