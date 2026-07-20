@@ -101,8 +101,6 @@ class RelationshipOut(BaseModel):
     target_concept_id: int
     relationship_type: str
     source_document_id: Optional[int]
-    strength: float = 0.7
-    reasoning: Optional[str] = None
     created_at: datetime
 
 
@@ -174,90 +172,6 @@ class ChatMessageOut(BaseModel):
 
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Presentation Plan schemas (plan → review → approve workflow)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class PlanSlide(BaseModel):
-    """One slide entry inside a PresentationPlan."""
-    slide_number: int
-    title: str
-    layout: str = "title_content"
-    purpose: Optional[str] = None
-    section: Optional[str] = None
-    bullets: list[str] = Field(default_factory=list)
-    columns: Optional[list[list[str]]] = None
-    col_heads: Optional[list[str]] = None
-    boxes: Optional[list[str]] = None
-    stats: Optional[list[dict]] = None
-    notes: Optional[str] = None
-    visual_recommendation: Optional[str] = None
-    # Plan-phase annotation fields — populated by Claude during blueprint generation.
-    # These make the plan review rich: show exactly which graph intelligence each slide uses.
-    # key_insights: the "so what" consulting takeaways the user sees before approving.
-    key_insights: list[str] = Field(default_factory=list)
-    graph_concepts: list[str] = Field(default_factory=list)
-    relationships_used: list[str] = Field(default_factory=list)
-    patterns_used: list[str] = Field(default_factory=list)
-    evidence: list[str] = Field(default_factory=list)
-
-
-class PresentationPlanCreate(BaseModel):
-    """Request body for generating a new presentation plan."""
-    type: str = Field(..., pattern="^(client_101|client_201|executive_summary)$")
-    focus_area: Optional[str] = None
-
-
-class GraphCoverage(BaseModel):
-    """Deck-level knowledge-graph coverage — shown so the UI communicates that the
-    graph is actively used (the plan strips per-slide attribution for token
-    efficiency, which previously made the UI display 0)."""
-    concepts_available: int = 0
-    relationships_analyzed: int = 0
-    patterns_available: int = 0
-    source_documents: int = 0
-    concepts_selected: int = 0
-
-
-class PresentationPlanOut(BaseModel):
-    """Serialised plan returned to the frontend."""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    workspace_id: int
-    deliverable_type: str
-    focus_area: Optional[str]
-    # Deck-level graph coverage (None for older plans generated before this field)
-    graph_coverage: Optional[GraphCoverage] = None
-    # Parsed slide list for the frontend
-    slides: list[PlanSlide] = Field(default_factory=list)
-    # Governing messages / storyline from the blueprint
-    governing_messages: list[str] = Field(default_factory=list)
-    storyline_summary: Optional[str] = None
-    deck_title: Optional[str] = None
-    revision_history: list[dict] = Field(default_factory=list)
-    status: str
-    deliverable_id: Optional[int] = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class PlanRevisionRequest(BaseModel):
-    """User instruction to revise the plan."""
-    instruction: str = Field(..., min_length=1, max_length=2000)
-
-
-class PlanSlidesUpdate(BaseModel):
-    """
-    Payload to persist the user's local slide edits (reorder / remove).
-
-    Contains the COMPLETE ordered list of slides after the user's edits.
-    The backend replaces the blueprint's slide array with this list and
-    renumbers slide_number fields sequentially from 1.
-    """
-    slides: list[PlanSlide] = Field(..., min_length=1)
-
-
 class DeliverableCreate(BaseModel):
     type: str = Field(..., pattern="^(client_101|client_201|executive_summary)$")
     # focus_area is only meaningful for executive_summary; ignored for client_101/201
@@ -277,19 +191,9 @@ class DeliverableOut(BaseModel):
     created_at: datetime
 
 
-class ValidationSummary(BaseModel):
-    """Stats from the deterministic validation layer that runs before PPTX render."""
-    slides_removed: int = 0
-    slides_fixed: int = 0
-    slide_count_before: int = 0
-    slide_count_after: int = 0
-
-
 class DeliverablePptxResponse(SourcedResponseMixin):
     deliverable: DeliverableOut
     sources: list[SourceRef] = Field(default_factory=list)
     # Raw PPTX bytes — not serialised to JSON; consumed directly by the API layer
     pptx_bytes: bytes = Field(default=b"", exclude=True)
     filename: str = ""
-    # Validation layer outcome — exposed as response headers for transparency
-    validation: ValidationSummary = Field(default_factory=ValidationSummary)

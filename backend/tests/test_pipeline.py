@@ -217,16 +217,7 @@ def test_pipeline_nonexistent_document_id_is_noop():
 
 
 @patch("app.extraction.concept_agent.chat", side_effect=RuntimeError("LLM API error"))
-def test_pipeline_llm_error_completes_with_zero_concepts(mock_llm):
-    """
-    A LLM failure on every chunk during concept extraction must NOT mark the
-    document as 'failed'.  The pipeline now logs a warning and proceeds with
-    zero concepts — the document completes successfully so it can be re-tried
-    without manual intervention.
-
-    Previously this test asserted upload_status == 'failed', but that behaviour
-    was a bug: a transient LLM timeout in one chunk poisoned the whole document.
-    """
+def test_pipeline_llm_error_sets_failed(mock_llm):
     engine, Session = _make_session("pl_llm_error")
     db = Session()
     tmp_path = None
@@ -261,11 +252,8 @@ def test_pipeline_llm_error_completes_with_zero_concepts(mock_llm):
 
         db2 = Session()
         doc2 = db2.get(Document, doc_id)
-        # Document must complete (not fail) — partial extraction beats total failure
-        assert doc2.upload_status == "complete", (
-            f"Expected 'complete' after LLM chunk error, got '{doc2.upload_status}': "
-            f"{doc2.error_message}"
-        )
+        assert doc2.upload_status == "failed"
+        assert "LLM API error" in (doc2.error_message or "")
         db2.close()
     finally:
         if tmp_path:

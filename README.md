@@ -30,7 +30,7 @@ The Knowledge Intelligence Platform compiles your consulting content into a stru
 | A body of work | **Consulting Patterns** — recurring approaches to recurring problems |
 | All of the above | **Knowledge Graph** — an interactive, explorable intelligence layer |
 | Questions | **Evidence-grounded answers** — every claim traced to a source document |
-| A topic + audience | **Client-ready deliverables** — PowerPoint presentations grounded in graph intelligence |
+| A topic + audience | **Client-ready deliverables** — Client 101, Client 201, executive summaries |
 
 ---
 
@@ -48,21 +48,6 @@ Every LLM call passes through a governance pipeline before reaching the provider
 | **Observability** | Structured log lines include workspace ID, operation, latency, token counts, and cost estimate. API keys, prompts, and credentials are never logged |
 
 Admin visibility: `GET /admin/llm/usage` and `GET /admin/llm/budgets` return usage aggregates and budget status.
-
----
-
-## LLM Reliability
-
-The platform implements a defence-in-depth retry strategy for the IBM ICA Claude gateway:
-
-| Setting | Default | Description |
-|---|---|---|
-| `LLM_READ_TIMEOUT` | `360` | Seconds to wait for the first response byte. Covers normal generation (~60–134s) plus headroom for slow gateway periods |
-| `LLM_MAX_RETRIES` | `3` | Retry attempts after the initial call (4 total attempts) |
-| `LLM_RETRY_MAX_WAIT` | `30` | Backoff ceiling in seconds (exponential + jitter, initial step ~5s) |
-| `LLM_CONNECT_TIMEOUT` | `10` | Seconds for TCP connection + TLS handshake |
-
-The Anthropic SDK is initialised with `max_retries=0` to prevent SDK-level double-retry storms. All retry logic lives exclusively in the Tenacity layer (`backend/app/llm/retry.py`), which retries only on transient errors (httpx timeouts, connection errors, HTTP 429, HTTP 5xx). The circuit breaker then fast-fails subsequent requests if repeated retries exhaust.
 
 ---
 
@@ -85,12 +70,10 @@ All parsers (PyMuPDF, python-docx, python-pptx) are wrapped with defensive excep
 ## Key Features
 
 ### Workspace Management
-Isolated knowledge domains. Each workspace contains its own documents, concepts, relationships, and patterns. No cross-workspace knowledge leakage. Workspaces are independently versioned — the graph version increments on every document add or delete, invalidating cached graph state.
+Isolated knowledge domains. Each workspace contains its own documents, concepts, relationships, and patterns. No cross-workspace knowledge leakage.
 
 ### Document Processing
 Upload PDF, DOCX, or PPTX files. The platform automatically runs a four-stage compilation pipeline: text extraction → concept detection → relationship mapping → pattern recognition. No manual tagging required.
-
-Document deletion cascades fully: deleting a document removes its concepts, prunes relationships sourced from those concepts, drops consulting patterns that lose all source documents, and invalidates the workspace graph cache.
 
 ### Knowledge Extraction
 Three chained extraction agents compile documents into the knowledge graph:
@@ -104,92 +87,39 @@ Ask questions in natural language. The assistant retrieves relevant context usin
 ### Interactive Knowledge Graph
 Explore compiled knowledge as an interactive node-edge graph. Click any concept to see its definition, verbatim source evidence, connected concepts, and relationship types. Built on React Flow with strength-weighted edges.
 
-### Client Material Generator — Plan → Review → Approve → Generate
-Generate consultant-quality PowerPoint presentations directly from compiled workspace knowledge using the IBM IPC template. Three deliverable types are supported: **Client 101** (business briefing for new engagement teams), **Client 201** (deep technical analysis for experienced teams), and **Executive Summary** (focused leadership briefing).
-
-The workflow is:
-1. **Select** — choose deliverable type and optional focus area
-2. **Plan** — Claude analyses the knowledge graph (concepts, relationships, patterns, evidence, source documents) and returns a slide-by-slide Presentation Plan with per-slide `key_insights`, `graph_concepts`, `relationships_used`, `patterns_used`, and `evidence` annotations
-3. **Review** — inspect the proposed deck structure, remove/reorder/add slides, send natural-language revision instructions to Claude (repeatable)
-4. **Approve** — approve the plan; the deterministic validation layer runs, then the PowerPoint renderer assembles the final `.pptx`
-
-The PowerPoint generator does not make presentation decisions — it only renders. Claude is the presentation architect.
-
-### Validation Layer (Pre-Render Gate)
-A deterministic Python validator runs before every PPTX render (no LLM calls):
-- Removes empty, placeholder, and stray-Sources slides
-- Reroutes unsupported layouts to content-preserving equivalents
-- Enforces layout diversity (no more than 2 consecutive identical layouts)
-- Rewrites label section dividers into insight statements; drops orphaned dividers
-- Applies ending-backstop: swaps a weak final slide with a recommendation close if one exists
-- Enforces `process_diagram` minimum 4 steps (demotes to `title_content` below threshold)
-- Fixes bullet termination (ensures periods)
-
-### Graph Coverage Reporting
-Every generated plan returns a `graph_coverage` object showing how much of the workspace knowledge was analysed: concepts available, relationships analysed, consulting patterns available, source documents, and concepts selected for the blueprint.
-
-### Brain Audit & Certification
-Two quality-assurance systems:
-- **Memory Audit** — per-document ingestion quality scores covering evidence coverage, extraction density, and graph integrity
-- **Brain Certification** — automated retrieval accuracy benchmarks using LLM-generated probe questions, scoring recall, precision, coverage, and consistency
+### Deliverable Generation
+Generate client-ready consulting documents (Point of View, Executive Summary, Roadmap) directly from compiled workspace knowledge. Every section cites source documents. Export as Markdown or DOCX.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                   Browser  (React + TypeScript)                   │
-│  Workspace List │ Document Upload │ Knowledge Graph               │
-│  Assistant Chat │ Memory Audit │ Brain Certification               │
-│  Client Material Generator                                        │
-│    Select → Plan → Review → Approve → Generate PPTX              │
-└───────────────────────────┬─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                  Browser  (React + TypeScript)               │
+│  Workspace List │ Document Upload │ Knowledge Graph          │
+│  Assistant Chat │ Deliverable Generator                      │
+└───────────────────────────┬─────────────────────────────────┘
                             │  HTTP/REST — Vite proxy → :8000
                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│            Knowledge Intelligence Platform  (FastAPI)            │
-│                                                                  │
-│  Ingestion            Knowledge Compiler      Graph Engine       │
-│  PyMuPDF              Concept Agent           NetworkX           │
-│  python-docx          Relationship Agent      builder.py         │
-│  python-pptx          Pattern Agent           traversal.py       │
-│  Spreadsheet parsers  Spreadsheet Agent       memory_manager.py  │
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────┐     │
-│  │              SQLAlchemy ORM  (DB-agnostic)               │     │
-│  │  Workspace · Document · Concept · Relationship           │     │
-│  │  ConsultingPattern · Deliverable · ChatMessage           │     │
-│  │  PresentationPlan · LLMUsage · LLMBudget                 │     │
-│  └────────────────────────────────────────────────────────┘     │
-│                                                                  │
-│  Retrieval / QA              LLM (Claude via ICA)                │
-│  qa_service.py               Extraction, Q&A, blueprint,         │
-│  plan_service.py             revision, conditional review,       │
-│  deliverable_service.py      PPTX rendering pipeline             │
-│                                                                  │
-│  LLM Governance              Quality Gates                       │
-│  circuit_breaker.py          audit_service.py                    │
-│  governance.py               certification_service.py            │
-│  retry.py (Tenacity)         _validate_deck_spec()               │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Deliverable Generation Pipeline
-
-```
-User selects type            Claude analyses graph         Claude returns plan
-(Client 101/201 or     →    (concepts, relationships,  →  (slide-by-slide with
- Executive Summary)          patterns, evidence,            key_insights, graph_
-                             source documents)              concepts, evidence)
-                                                                    ↓
-PPTX downloaded    ←   PowerPoint render   ←   Approve   ←   User reviews,
-(IBM IPC template)      (no LLM calls)      & generate       revises, reorders,
-                                                              adds slides
-         ↑
-   Validation layer runs before render:
-   removes empty slides, enforces layout diversity,
-   applies ending backstop, fixes bullet termination
+┌─────────────────────────────────────────────────────────────┐
+│            Knowledge Intelligence Platform  (FastAPI)        │
+│                                                              │
+│  Ingestion          Knowledge Compiler     Graph Engine      │
+│  PyMuPDF            Concept Agent          NetworkX          │
+│  python-docx        Relationship Agent     builder.py        │
+│  python-pptx        Pattern Agent          traversal.py      │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │            SQLAlchemy ORM  (DB-agnostic)              │   │
+│  │  Workspace · Document · Concept · Relationship        │   │
+│  │  ConsultingPattern · Deliverable · ChatMessage        │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  Retrieval / QA              LLM (Claude via ICA)            │
+│  qa_service.py               All extraction, Q&A,            │
+│  deliverable_service.py      and deliverable generation      │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 | Layer | Technology |
@@ -201,7 +131,6 @@ PPTX downloaded    ←   PowerPoint render   ←   Approve   ←   User reviews,
 | Graph engine | NetworkX (development) → Amazon Neptune / Neo4j (production) |
 | LLM | Claude via IBM Consulting Advantage endpoint |
 | Document parsing | PyMuPDF (PDF), python-docx (DOCX), python-pptx (PPTX) |
-| PPTX template | IBM IPC_PPT_Template_2026.pptx |
 
 ---
 
@@ -268,137 +197,104 @@ All LLM calls are mocked. No API cost in CI.
 ckip/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                       # FastAPI entrypoint
-│   │   ├── config.py                     # All settings via environment variables
-│   │   ├── schemas.py                    # Pydantic models — API I/O, GraphCoverage, plan schemas
-│   │   ├── llm_client.py                 # LLM client (ICA Claude endpoint, proxy pattern)
+│   │   ├── main.py                   # FastAPI entrypoint
+│   │   ├── config.py                 # All settings via environment variables
+│   │   ├── schemas.py                # Pydantic models — API I/O and grounding enforcement
+│   │   ├── llm_client.py             # LLM client (ICA Claude endpoint)
 │   │   ├── db/
-│   │   │   ├── models.py                 # SQLAlchemy ORM models (incl. PresentationPlan)
-│   │   │   └── session.py                # Session factory, init_db()
+│   │   │   ├── models.py             # SQLAlchemy ORM models
+│   │   │   └── session.py            # Session factory, init_db()
 │   │   ├── core/
-│   │   │   └── upload_validation.py      # Magic-byte detection, size limit, MIME allow-list
+│   │   │   └── upload_validation.py  # Magic-byte detection, size limit, MIME allow-list
 │   │   ├── security/
-│   │   │   └── secrets.py                # SecretProvider abstraction layer
+│   │   │   └── secrets.py            # SecretProvider abstraction layer
 │   │   ├── llm/
-│   │   │   ├── circuit_breaker.py        # CLOSED/OPEN/HALF_OPEN circuit breaker
-│   │   │   ├── governance.py             # Budget enforcement + rate limiting
-│   │   │   ├── retry.py                  # Tenacity retry policy (transient-only, no SDK doubling)
-│   │   │   └── usage_tracker.py          # Token/cost recording per API call
+│   │   │   ├── circuit_breaker.py    # CLOSED/OPEN/HALF_OPEN circuit breaker
+│   │   │   ├── governance.py         # Budget enforcement + rate limiting
+│   │   │   └── usage_tracker.py      # Token/cost recording per API call
 │   │   ├── ingestion/
-│   │   │   ├── parsers.py                # PDF/DOCX/PPTX → raw text + metadata
-│   │   │   ├── pipeline.py               # Orchestration: parse → extract → graph
-│   │   │   └── spreadsheets/             # CSV/Excel parsers and schema extractor
+│   │   │   ├── parsers.py            # PDF/DOCX/PPTX → raw text + metadata
+│   │   │   └── pipeline.py           # Orchestration: parse → extract → graph
 │   │   ├── extraction/
-│   │   │   ├── concept_agent.py          # Concept extraction with confidence scoring
-│   │   │   ├── relationship_agent.py     # Relationship discovery with strength scoring
-│   │   │   ├── pattern_agent.py          # Consulting pattern recognition
-│   │   │   ├── pattern_evolution.py      # Pattern re-extraction on workspace growth
-│   │   │   └── spreadsheet_concept_agent.py  # Concept extraction from tabular data
+│   │   │   ├── concept_agent.py      # Concept extraction with confidence scoring
+│   │   │   ├── relationship_agent.py # Relationship discovery with strength scoring
+│   │   │   └── pattern_agent.py      # Consulting pattern recognition
 │   │   ├── graph/
-│   │   │   ├── builder.py                # NetworkX graph from SQL (derived layer)
-│   │   │   ├── traversal.py              # Semantic node search + strength-filtered BFS
-│   │   │   ├── memory_manager.py         # Versioned graph cache with invalidation
-│   │   │   ├── store.py                  # Graph persistence helpers
-│   │   │   ├── audit_service.py          # Per-document and workspace quality scoring
-│   │   │   └── certification_service.py  # Retrieval accuracy benchmarking
+│   │   │   ├── builder.py            # NetworkX graph from SQL (derived layer)
+│   │   │   └── traversal.py          # Semantic node search + strength-filtered BFS
 │   │   ├── retrieval/
-│   │   │   └── qa_service.py             # Evidence-grounded Q&A pipeline
+│   │   │   └── qa_service.py         # Evidence-grounded Q&A pipeline
 │   │   ├── generation/
-│   │   │   ├── plan_service.py           # Plan workflow: generate → revise → approve
-│   │   │   └── deliverable_service.py    # Five-phase PPTX pipeline (blueprint → validation → render)
+│   │   │   └── deliverable_service.py # POV / executive summary / roadmap generation
 │   │   └── api/
 │   │       ├── workspaces.py
-│   │       ├── documents.py              # Full deletion cascade (concepts, rels, patterns)
+│   │       ├── documents.py
 │   │       ├── graph.py
 │   │       ├── assistant.py
-│   │       ├── plans.py                  # Plan workflow API (6 routes)
-│   │       ├── deliverables.py           # Direct generation + re-export
-│   │       ├── audit.py                  # Memory audit API
-│   │       ├── certification.py          # Brain certification API
-│   │       └── admin.py                  # LLM usage + budget visibility endpoints
-│   ├── deliverables/
-│   │   ├── generators/
-│   │   │   └── powerpoint_generator.py   # PPTX renderer (IBM IPC template)
-│   │   ├── prompts/
-│   │   │   ├── client_101.md             # Client 101 deliverable methodology
-│   │   │   ├── client_201.md             # Client 201 deliverable methodology
-│   │   │   └── executive_summary.md      # Executive Summary deliverable methodology
-│   │   └── templates/
-│   │       └── IPC_PPT_Template_2026.pptx  # IBM IPC PowerPoint master template
+│   │       ├── deliverables.py
+│   │       └── admin.py              # LLM usage + budget visibility endpoints
 │   ├── tests/
-│   │   ├── test_api.py                   # Integration tests — every route and error path
-│   │   ├── test_audit_service.py         # Memory audit scoring tests
-│   │   ├── test_certification.py         # Brain certification benchmark tests
-│   │   ├── test_document_deletion.py     # Deletion cascade correctness tests
-│   │   ├── test_graph.py                 # Graph builder + traversal unit tests
-│   │   ├── test_graph_memory.py          # Graph cache versioning + invalidation tests
-│   │   ├── test_llm_governance.py        # Secrets, budget, circuit breaker, rate limiter
-│   │   ├── test_llm_resilience.py        # Timeout, retry, SDK double-retry prevention
-│   │   ├── test_parsers.py               # PDF/DOCX/PPTX extraction tests
-│   │   ├── test_pipeline.py              # Full ingestion pipeline tests
-│   │   ├── test_plan_workflow.py         # Plan generate → revise → approve workflow (81 tests)
-│   │   ├── test_powerpoint_renderer.py   # PPTX layout and rendering tests
+│   │   ├── test_api.py               # Integration tests — every route and error path
+│   │   ├── test_graph.py             # Graph builder + traversal unit tests
+│   │   ├── test_llm_governance.py    # Secrets, budget, circuit breaker, rate limiter
+│   │   ├── test_parsers.py           # PDF/DOCX/PPTX extraction tests
+│   │   ├── test_pipeline.py          # Full ingestion pipeline tests
 │   │   ├── test_retrieval_consistency.py # Retrieval determinism and scoring tests
-│   │   ├── test_schemas.py               # Pydantic validation and grounding rule tests
-│   │   ├── test_spreadsheet.py           # CSV/Excel ingestion and extraction tests
-│   │   ├── test_stability.py             # Stability and regression tests
-│   │   ├── test_stress.py                # Concurrency and large-workspace tests
-│   │   ├── test_upload_security.py       # File size, magic-byte, and spoofing tests
-│   │   ├── test_visual_qa.py             # Visual QA and slide rendering validation tests
-│   │   └── test_workspace_isolation.py   # Cross-workspace isolation enforcement tests
-│   ├── .env.example                      # Environment variable template
+│   │   ├── test_schemas.py           # Pydantic validation and grounding rule tests
+│   │   ├── test_stress.py            # Concurrency and large-workspace tests
+│   │   └── test_upload_security.py   # File size, magic-byte, and spoofing tests
+│   ├── .env.example                  # Environment variable template
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
 │       ├── pages/
-│       │   ├── WorkspaceList.tsx         # Workspace grid + create
-│       │   ├── DocumentUpload.tsx        # Drag-and-drop + status polling
-│       │   ├── GraphExplorer.tsx         # React Flow canvas + node side panel
-│       │   ├── AssistantChat.tsx         # Chat UI with source citations
-│       │   ├── MemoryAudit.tsx           # Per-document and workspace audit scores
-│       │   ├── BrainCertification.tsx    # Retrieval certification dashboard
-│       │   └── DeliverableGenerator.tsx  # Plan → review → approve → generate PPTX
-│       ├── api/client.ts                 # Typed API client (proxied to :8000)
-│       └── types/api.ts                  # TypeScript interfaces (incl. GraphCoverage, PlanSlide)
+│       │   ├── WorkspaceList.tsx     # Workspace grid + create
+│       │   ├── DocumentUpload.tsx    # Drag-and-drop + status polling
+│       │   ├── GraphExplorer.tsx     # React Flow canvas + node side panel
+│       │   ├── AssistantChat.tsx     # Chat UI with source citations
+│       │   └── DeliverableGenerator.tsx # Generate + edit + export
+│       ├── api/client.ts             # Typed API client (proxied to :8000)
+│       └── types/api.ts              # TypeScript interfaces
 └── docs/
-    ├── adr-payments-center-brain.md      # ADR: Payments Center Brain (future capability)
-    ├── architecture-rc-v1.1.md           # RC v1.1 architecture report
-    └── technical-debt-rc-v1.1.md         # RC v1.1 technical debt and readiness assessment
+    ├── requirements.md               # Personas, user stories, acceptance criteria
+    ├── architecture.md               # System design and technical decisions
+    ├── api-reference.md              # Complete API endpoint reference
+    └── adr-payments-center-brain.md  # ADR: Payments Center Brain (future)
 ```
 
 ---
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|---|---|---|
-| `CLAUDE_API_KEY` | — | Raw API key. Local dev only — leave blank in production |
-| `CLAUDE_SECRET_NAME` | `CLAUDE_API_KEY` | Secret name resolved by `SecretProvider` at runtime |
-| `CLAUDE_BASE_URL` | `https://api.nextgen-beta.ica.ibm.com/ica` | ICA Claude endpoint |
-| `CLAUDE_MODEL` | `claude-sonnet-4-5` | Claude model version |
-| `DATABASE_URL` | `sqlite:///./knowledge_platform.db` | SQLAlchemy DB URL |
-| `UPLOAD_DIR` | `./uploads` | Local file storage path |
-| `MAX_UPLOAD_BYTES` | `26214400` | Maximum upload size per file (default 25 MB) |
-| `CHUNK_SIZE` | `3000` | Max characters per extraction chunk |
-| `CHUNK_OVERLAP` | `200` | Character overlap between adjacent chunks |
-| `GRAPH_HOP_DEPTH` | `2` | N-hop depth for graph traversal |
-| `GRAPH_STRENGTH_THRESHOLD` | `0.35` | Minimum edge strength to follow in BFS. Matches relationship extraction floor so all stored relationships participate in retrieval |
-| `GRAPH_MAX_NODES` | `100` | Max nodes expanded per traversal |
-| `CONCEPT_CONFIDENCE_MIN` | `0.6` | Minimum concept confidence score to persist |
-| `PATTERN_EXTRACTION_THRESHOLD_PERCENT` | `10` | Minimum % growth in concepts or relationships to trigger pattern re-extraction |
-| `QA_TOP_K` | `30` | Seed nodes retrieved per Q&A query |
-| `LLM_CB_FAILURE_THRESHOLD` | `5` | Consecutive failures before circuit breaker opens |
-| `LLM_CB_RECOVERY_TIMEOUT` | `60` | Seconds before breaker transitions to half-open |
-| `MAX_LLM_REQUESTS_PER_MINUTE` | `60` | Per-workspace LLM request rate limit |
-| `LLM_RATE_WINDOW_SECONDS` | `60` | Sliding window duration for rate limiting |
-| `LLM_COST_PER_1K_INPUT_TOKENS` | `0.003` | USD cost per 1 000 input tokens |
-| `LLM_COST_PER_1K_OUTPUT_TOKENS` | `0.015` | USD cost per 1 000 output tokens |
-| `LLM_CONNECT_TIMEOUT` | `10` | Seconds to wait for TCP connection + TLS handshake |
-| `LLM_READ_TIMEOUT` | `360` | Seconds to wait for the first response byte from the LLM |
-| `LLM_WRITE_TIMEOUT` | `30` | Seconds to wait while uploading the request body |
-| `LLM_MAX_RETRIES` | `3` | Retry attempts after the initial call (4 total attempts) |
-| `LLM_RETRY_MAX_WAIT` | `30` | Backoff ceiling in seconds (exponential + jitter) |
-| `CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Comma-separated allowed CORS origins |
+| Variable                               | Default                                    | Description                                                                    |
+| ----------------------------------------| --------------------------------------------| --------------------------------------------------------------------------------|
+| `CLAUDE_API_KEY`                       | —                                          | Raw API key. Local dev only — leave blank in production                        |
+| `CLAUDE_SECRET_NAME`                   | `CLAUDE_API_KEY`                           | Secret name resolved by `SecretProvider` at runtime                            |
+| `CLAUDE_BASE_URL`                      | `https://api.nextgen-beta.ica.ibm.com/ica` | ICA Claude endpoint                                                            |
+| `CLAUDE_MODEL`                         | `claude-sonnet-4-5`                        | Claude model version                                                           |
+| `DATABASE_URL`                         | `sqlite:///./knowledge_platform.db`        | SQLAlchemy DB URL                                                              |
+| `UPLOAD_DIR`                           | `./uploads`                                | Local file storage path                                                        |
+| `MAX_UPLOAD_BYTES`                     | `26214400`                                 | Maximum upload size per file (default 25 MB)                                   |
+| `CHUNK_SIZE`                           | `3000`                                     | Max characters per extraction chunk                                            |
+| `CHUNK_OVERLAP`                        | `200`                                      | Character overlap between adjacent chunks                                      |
+| `GRAPH_HOP_DEPTH`                      | `2`                                        | N-hop depth for graph traversal                                                |
+| `GRAPH_STRENGTH_THRESHOLD`             | `0.5`                                      | Minimum edge strength to follow in BFS                                         |
+| `GRAPH_MAX_NODES`                      | `60`                                       | Max nodes expanded per traversal                                               |
+| `CONCEPT_CONFIDENCE_MIN`               | `0.6`                                      | Minimum concept confidence score to persist                                    |
+| `PATTERN_EXTRACTION_THRESHOLD_PERCENT` | `10`                                       | Minimum % growth in concepts or relationships to trigger pattern re-extraction |
+| `QA_TOP_K`                             | `20`                                       | Seed nodes retrieved per Q&A query                                             |
+| `LLM_CB_FAILURE_THRESHOLD`             | `5`                                        | Consecutive failures before circuit breaker opens                              |
+| `LLM_CB_RECOVERY_TIMEOUT`              | `60`                                       | Seconds before breaker transitions to half-open                                |
+| `MAX_LLM_REQUESTS_PER_MINUTE`          | `60`                                       | Per-workspace LLM request rate limit                                           |
+| `LLM_RATE_WINDOW_SECONDS`              | `60`                                       | Sliding window duration for rate limiting                                      |
+| `LLM_COST_PER_1K_INPUT_TOKENS`         | `0.003`                                    | USD cost per 1 000 input tokens                                                |
+| `LLM_COST_PER_1K_OUTPUT_TOKENS`        | `0.015`                                    | USD cost per 1 000 output tokens                                               |
+| `LLM_CONNECT_TIMEOUT`                  | `10`                                       | Seconds to wait for TCP connection + TLS handshake                             |
+| `LLM_READ_TIMEOUT`                     | `120`                                      | Seconds to wait for the first response byte from the LLM                       |
+| `LLM_WRITE_TIMEOUT`                    | `30`                                       | Seconds to wait while uploading the request body                               |
+| `LLM_MAX_RETRIES`                      | `4`                                        | Retry attempts after the initial call (5 total)                                |
+| `LLM_RETRY_MAX_WAIT`                   | `30`                                       | Backoff ceiling in seconds (exponential + jitter)                              |
+| `CORS_ORIGINS`                         | `http://localhost:5173`                    | Comma-separated allowed CORS origins                                           |
 
 ---
 
@@ -436,15 +332,15 @@ The platform does not use internet search, web browsing, or general knowledge fo
 
 Every component is designed for swap-in replacement without code changes:
 
-| Component | Development | Production |
-|---|---|---|
-| Database | SQLite | RDS PostgreSQL (change `DATABASE_URL`) |
-| Graph engine | NetworkX in-process | Amazon Neptune / Neo4j |
-| Task queue | FastAPI BackgroundTasks | SQS + Celery worker fleet |
-| File storage | Local `./uploads` | S3 |
-| Deployment | `uvicorn` local | ECS Fargate + CloudFront |
-| Authentication | None | IBM SSO / Cognito |
-| LLM endpoint | ICA Claude direct | Amazon Bedrock (Claude) |
+| Component      | Development             | Production                             |
+| ----------------| -------------------------| ----------------------------------------|
+| Database       | SQLite                  | RDS PostgreSQL (change `DATABASE_URL`) |
+| Graph engine   | NetworkX in-process     | Amazon Neptune / Neo4j                 |
+| Task queue     | FastAPI BackgroundTasks | SQS + Celery worker fleet              |
+| File storage   | Local `./uploads`       | S3                                     |
+| Deployment     | `uvicorn` local         | ECS Fargate + CloudFront               |
+| Authentication | None                    | IBM SSO / Cognito                      |
+| LLM endpoint   | ICA Claude direct       | Amazon Bedrock (Claude)                |
 
 ---
 

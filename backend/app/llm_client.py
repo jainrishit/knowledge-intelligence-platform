@@ -10,7 +10,7 @@ Wraps the Anthropic SDK with:
 
 Timeout defaults (all configurable via environment):
   LLM_CONNECT_TIMEOUT   10 s   TCP handshake + TLS
-  LLM_READ_TIMEOUT     240 s   time waiting for the first response byte
+  LLM_READ_TIMEOUT     120 s   time waiting for the first response byte
   LLM_WRITE_TIMEOUT     30 s   time uploading the request body
 
 Retry defaults:
@@ -44,17 +44,7 @@ logger = logging.getLogger(__name__)
 
 @lru_cache(maxsize=1)
 def _get_client() -> anthropic.Anthropic:
-    """Build and cache the Anthropic SDK client.
-
-    IMPORTANT: max_retries=0 disables the Anthropic SDK's own built-in retry
-    loop.  We own all retry logic through Tenacity in llm_retry().
-    Without this, a 502 storm triggers BOTH the SDK's retries AND our Tenacity
-    retries, compounding into 200-300 s hangs:
-      SDK attempt × 3 (internal) × Tenacity attempt × 3 (our) = 9 real HTTP
-      requests, each waiting up to 25 s before the gateway gives up.
-    With max_retries=0 the SDK raises immediately on any error, and Tenacity
-    controls how many times we retry and how long we wait.
-    """
+    """Build and cache the Anthropic SDK client."""
     provider = get_secret_provider()
     api_key = provider.get_secret(settings.claude_secret_name)
     timeout = httpx.Timeout(
@@ -67,54 +57,7 @@ def _get_client() -> anthropic.Anthropic:
         api_key=api_key,
         base_url=settings.claude_base_url,
         timeout=timeout,
-        max_retries=0,          # Tenacity owns all retry logic — no SDK double-retry
     )
-
-
-# Cache the Tenacity retry decorator (not the wrapped function) keyed on
-# (max_retries, max_wait) so we don't rebuild the decorator on every chat() call.
-# We wrap a thin proxy (_call_api_proxy) rather than _call_api directly so that
-# unittest.mock.patch("app.llm_client._call_api") still works in tests — the proxy
-# reads the current module-level _call_api on each invocation, which respects patches.
-_retry_decorator_cache: dict = {}
-
-
-def _call_api_proxy(system: str, user: str, max_tokens: int, temperature: float):
-    """Thin proxy — always calls the current module-level _call_api.
-    Allows unittest.mock.patch("app.llm_client._call_api") to work correctly
-    even when the Tenacity wrapper is cached across test runs."""
-    return _call_api(system, user, max_tokens, temperature)
-
-
-def _failure_reason(cause: BaseException | None) -> str:
-    """Human-readable reason for a surfaced LLM failure (429 / timeout / 5xx / …)."""
-    if isinstance(cause, anthropic.APIStatusError):
-        return {
-            429: "provider rate limit (429)",
-            500: "provider error (500)",
-            502: "provider bad gateway (502)",
-            503: "provider unavailable (503)",
-            504: "provider gateway timeout (504)",
-        }.get(getattr(cause, "status_code", None), f"provider error ({getattr(cause, 'status_code', '5xx')})")
-    if isinstance(cause, httpx.TimeoutException):
-        return "provider timeout"
-    if isinstance(cause, (httpx.ConnectError, httpx.RemoteProtocolError)):
-        return "provider connection error"
-    return type(cause).__name__ if cause else "unknown error"
-
-
-def _get_retried_call():
-    """
-    Return a Tenacity-wrapped _call_api_proxy for the current retry settings.
-
-    The key is (llm_max_retries, llm_retry_max_wait).  When tests monkeypatch
-    those settings, a new decorator is built automatically.  Patching
-    _call_api is still effective because the proxy re-reads it each call.
-    """
-    key = (settings.llm_max_retries, settings.llm_retry_max_wait)
-    if key not in _retry_decorator_cache:
-        _retry_decorator_cache[key] = llm_retry()(_call_api_proxy)
-    return _retry_decorator_cache[key]
 
 
 def _call_api(
@@ -161,22 +104,18 @@ def chat(
     t0 = time.monotonic()
     retry_count = 0
 
-    # Use a module-level cached retry wrapper so the Tenacity decorator is not
-    # re-instantiated on every call.  The wrapper is rebuilt only when settings
-    # change (test monkeypatching forces a cache clear via _reset_retry_cache).
-    retried_call = _get_retried_call()
+    # Build a fresh retry decorator each call so monkeypatching settings in
+    # tests immediately takes effect without restarting the process.
+    _retried_call = llm_retry()(_call_api)
 
     with circuit_breaker:
         try:
-            message = retried_call(system, user, max_tokens, temperature)
+            message = _retried_call(system, user, max_tokens, temperature)
 
         except RetryError as exc:
-            # All attempts exhausted — unwrap, log, and SURFACE the real root cause
-            # (provider 5xx / rate-limit / timeout) instead of a generic message, so
-            # operators and users can tell what actually failed.
+            # All attempts exhausted — unwrap and log the root cause.
             cause = exc.last_attempt.exception()
             retry_count = exc.last_attempt.attempt_number - 1
-            reason = _failure_reason(cause)
             logger.error(
                 "[req=%s op=%s] LLM call failed after %d retries. "
                 "Final error: %s %s",
@@ -185,8 +124,7 @@ def chat(
             )
             raise HTTPException(
                 status_code=503,
-                detail=f"Generation failed: {reason} (after {retry_count + 1} attempts). "
-                       "This is a temporary provider issue — please try again shortly.",
+                detail="LLM request failed after multiple retry attempts. Please try again shortly.",
             ) from exc
 
         except Exception:
@@ -195,7 +133,7 @@ def chat(
 
     latency_ms = (time.monotonic() - t0) * 1000
 
-    stats = getattr(retried_call, "statistics", {})
+    stats = getattr(_retried_call, "statistics", {})
     retry_count = max(0, stats.get("attempt_number", 1) - 1)
 
     usage = message.usage

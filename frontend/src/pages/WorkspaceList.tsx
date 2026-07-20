@@ -4,7 +4,7 @@ import { api } from '@/api/client';
 import type { Workspace } from '@/types/api';
 import {
   Plus, Trash2, FileText, Network, ChevronRight,
-  GitBranch, TrendingUp, Database,
+  GitBranch, Cpu, TrendingUp, Database, BarChart2,
 } from 'lucide-react';
 
 function timeAgo(dateStr: string | null): string {
@@ -19,6 +19,15 @@ function timeAgo(dateStr: string | null): string {
   return `${days}d ago`;
 }
 
+const FORMAT_COLOURS: Record<string, { bg: string; border: string; text: string }> = {
+  pdf:  { bg: '#fff1f2', border: '#f87171', text: '#b91c1c' },
+  docx: { bg: '#eff6ff', border: '#60a5fa', text: '#1d4ed8' },
+  pptx: { bg: '#fff7ed', border: '#fb923c', text: '#c2410c' },
+  xlsx: { bg: '#f0fdf4', border: '#4ade80', text: '#15803d' },
+  xls:  { bg: '#f0fdf4', border: '#4ade80', text: '#15803d' },
+  csv:  { bg: '#f8fafc', border: '#94a3b8', text: '#334155' },
+};
+
 function PlatformIntelligenceBar({ workspaces }: { workspaces: Workspace[] }) {
   const totalDocs      = workspaces.reduce((s, w) => s + w.document_count, 0);
   const totalConcepts  = workspaces.reduce((s, w) => s + w.concept_count, 0);
@@ -30,11 +39,13 @@ function PlatformIntelligenceBar({ workspaces }: { workspaces: Workspace[] }) {
 
   return (
     <div className="mb-8 border bg-white">
-      <div className="px-5 py-2.5 border-b flex items-center justify-between">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Platform Intelligence</span>
+      <div className="px-5 py-2.5 border-b flex items-center gap-2">
+        <BarChart2 className="w-3.5 h-3.5 text-primary" />
+        <span className="text-xs font-semibold text-foreground uppercase tracking-wider">Platform Intelligence</span>
         {activeGraphs > 0 && (
-          <span className="text-[11px] text-muted-foreground">
-            {activeGraphs} knowledge graph{activeGraphs > 1 ? 's' : ''} active
+          <span className="ml-auto flex items-center gap-1 text-[10px] text-green-600 font-medium">
+            <Cpu className="w-3 h-3 text-green-500" />
+            {activeGraphs} graph{activeGraphs > 1 ? 's' : ''} active in memory
           </span>
         )}
       </div>
@@ -76,6 +87,10 @@ function WorkspaceCard({ ws, onDelete, onClick }: {
   const hasGraph    = ws.concept_count > 0;
   const isProcessing = ws.document_count > 0 && ws.concept_count === 0;
 
+  const knowledgePct = hasGraph
+    ? Math.min(100, Math.round((ws.concept_count / Math.max(ws.concept_count, 200)) * 100))
+    : 0;
+
   return (
     <div
       onClick={onClick}
@@ -83,23 +98,29 @@ function WorkspaceCard({ ws, onDelete, onClick }: {
     >
       <button
         onClick={e => onDelete(ws.id, e)}
-        className="absolute top-4 right-4 p-1.5 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-4 right-4 p-1.5 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
         title="Delete workspace"
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
 
-      {/* Name + status */}
-      <div className="flex items-start gap-2 mb-2.5 pr-8">
+      {/* Name + description */}
+      <div className="flex items-start gap-2 mb-2 pr-8">
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-foreground text-[15px] leading-tight truncate">{ws.name}</h3>
           {ws.description && (
             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1 leading-relaxed">{ws.description}</p>
           )}
         </div>
+        {hasGraph && (
+          <span className="flex-shrink-0 flex items-center gap-1 text-[10px] px-2 py-0.5 bg-green-50 border border-green-200 text-green-700 rounded-full font-medium">
+            <Cpu className="w-2.5 h-2.5" />
+            Active
+          </span>
+        )}
         {isProcessing && (
-          <span className="flex-shrink-0 flex items-center gap-1 text-[10px] px-2 py-0.5 border text-muted-foreground font-medium">
-            <span className="w-1.5 h-1.5 rounded-full bg-foreground/30 animate-pulse" />
+          <span className="flex-shrink-0 flex items-center gap-1 text-[10px] px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-full font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
             Building
           </span>
         )}
@@ -111,61 +132,57 @@ function WorkspaceCard({ ws, onDelete, onClick }: {
           <FileText className="w-3 h-3" />
           {ws.document_count} {ws.document_count === 1 ? 'doc' : 'docs'}
         </span>
-        {ws.concept_count > 0 && (
-          <span className="flex items-center gap-1">
-            <Network className="w-3 h-3" />
-            {ws.concept_count.toLocaleString()} concepts
-          </span>
-        )}
+        <span className="flex items-center gap-1">
+          <Network className="w-3 h-3" />
+          {ws.concept_count.toLocaleString()} concepts
+        </span>
         {ws.relationship_count > 0 && (
           <span className="flex items-center gap-1">
             <GitBranch className="w-3 h-3" />
-            {ws.relationship_count} relationships
+            {ws.relationship_count} links
           </span>
         )}
         {ws.pattern_count > 0 && (
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1 text-primary font-medium">
             <TrendingUp className="w-3 h-3" />
             {ws.pattern_count} patterns
           </span>
         )}
       </div>
 
-      {/* Knowledge compilation bar */}
+      {/* Knowledge compilation progress bar */}
       {(hasGraph || isProcessing) && (
         <div className="mb-3">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-muted-foreground">
-              {isProcessing ? 'Building knowledge graph…' : 'Knowledge compiled'}
-            </span>
+            <span className="text-[10px] text-muted-foreground">Knowledge compiled</span>
             {hasGraph && (
               <span className="text-[10px] text-muted-foreground">
                 v{ws.graph_version} · {timeAgo(ws.graph_last_updated)}
               </span>
             )}
           </div>
-          <div className="h-px w-full bg-foreground/[0.1]">
+          <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
             <div
-              className={`h-full transition-all ${isProcessing ? 'bg-foreground/30 animate-pulse' : 'bg-foreground/60'}`}
-              style={{ width: isProcessing ? '35%' : '100%' }}
+              className={`h-full rounded-full transition-all ${isProcessing ? 'bg-amber-400 animate-pulse' : 'bg-green-500'}`}
+              style={{ width: isProcessing ? '35%' : `${knowledgePct}%` }}
             />
           </div>
         </div>
       )}
 
-      {/* Quick nav */}
+      {/* Quick nav links */}
       {hasGraph && (
         <div className="flex items-center gap-2 mt-1 pt-2 border-t border-border/50">
-          <span className="text-[10px] text-muted-foreground mr-1">Open:</span>
+          <span className="text-[10px] text-muted-foreground mr-1">Go to:</span>
           {[
-            { label: 'Knowledge Graph', path: 'graph' },
+            { label: 'Graph', path: 'graph' },
             { label: 'Assistant', path: 'chat' },
             { label: 'Deliverables', path: 'deliverables' },
           ].map(link => (
             <button
               key={link.path}
               onClick={e => { e.stopPropagation(); onClick(); }}
-              className="text-[10px] px-2 py-0.5 border text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors"
+              className="text-[10px] px-2 py-0.5 border rounded text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors"
             >
               {link.label}
               <ChevronRight className="w-2.5 h-2.5 inline ml-0.5 -mt-0.5" />
@@ -175,7 +192,7 @@ function WorkspaceCard({ ws, onDelete, onClick }: {
       )}
 
       {ws.document_count === 0 && (
-        <div className="mt-2 text-[11px] text-muted-foreground flex items-center gap-1.5">
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-primary font-medium">
           <Database className="w-3 h-3" />
           Upload documents to start building knowledge
         </div>

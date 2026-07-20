@@ -100,14 +100,11 @@ def get_neighbourhood(
     strength_threshold : only follow edges with strength >= this value.
                          Default 0.0 keeps backward compatibility (all edges).
     max_nodes          : cap on neighbourhood size to avoid context explosion.
-
-    Performance note: instead of calling G.to_undirected() (which allocates a
-    new graph object each time), we walk both G.successors and G.predecessors
-    directly — equivalent behaviour at zero allocation cost.
     """
     if not G.has_node(node_id):
         return [], []
 
+    undirected = G.to_undirected(as_view=True)
     subgraph_nodes: set[int] = {node_id}
     frontier: set[int] = {node_id}
 
@@ -116,8 +113,7 @@ def get_neighbourhood(
             break
         next_frontier: set[int] = set()
         for n in frontier:
-            # Walk both directions without creating an undirected view
-            for neighbour in list(G.successors(n)) + list(G.predecessors(n)):
+            for neighbour in undirected.neighbors(n):
                 if neighbour in subgraph_nodes:
                     continue
                 edge_data = (

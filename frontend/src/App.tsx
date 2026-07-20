@@ -4,21 +4,13 @@ import DocumentUpload from '@/pages/DocumentUpload';
 import GraphExplorer from '@/pages/GraphExplorer';
 import AssistantChat from '@/pages/AssistantChat';
 import DeliverableGenerator from '@/pages/DeliverableGenerator';
-import MemoryAudit from '@/pages/MemoryAudit';
-import BrainCertification from '@/pages/BrainCertification';
 import { ArrowLeft } from 'lucide-react';
 
-// Primary user journey tabs — the four stages every user works through.
-// Knowledge Health and Trust & Reliability have been moved off the primary
-// navigation bar. They remain fully functional backend systems and are still
-// reachable at their direct URLs (/audit, /certification) for developer /
-// admin use, but they no longer appear as top-level destinations for
-// business users.
 const TABS = [
   { path: 'documents',    label: 'Documents',       step: 1, hint: 'Ingest & compile' },
-  { path: 'graph',        label: 'Knowledge Graph', step: 2, hint: 'Explore relationships' },
+  { path: 'graph',        label: 'Knowledge Graph', step: 2, hint: 'Explore concepts' },
   { path: 'chat',         label: 'Assistant',       step: 3, hint: 'Evidence-grounded Q&A' },
-  { path: 'deliverables', label: 'Deliverables',    step: 4, hint: 'Client-ready outputs' },
+  { path: 'deliverables', label: 'Deliverables',    step: 4, hint: 'Generate outputs' },
 ];
 
 function WorkspaceNav() {
@@ -77,14 +69,11 @@ function WorkspaceLayout() {
       <WorkspaceNav />
       <div className="flex-1 bg-background">
         <Routes>
-          <Route path="documents"     element={<DocumentUpload />} />
-          <Route path="graph"         element={<GraphExplorer />} />
-          <Route path="chat"          element={<AssistantChat />} />
-          <Route path="deliverables"  element={<DeliverableGenerator />} />
-          {/* Backend governance pages — not in primary nav, accessible via direct URL */}
-          <Route path="audit"         element={<MemoryAudit />} />
-          <Route path="certification" element={<BrainCertification />} />
-          <Route path="*"             element={<Navigate to="documents" replace />} />
+          <Route path="documents"    element={<DocumentUpload />} />
+          <Route path="graph"        element={<GraphExplorer />} />
+          <Route path="chat"         element={<AssistantChat />} />
+          <Route path="deliverables" element={<DeliverableGenerator />} />
+          <Route path="*"            element={<Navigate to="documents" replace />} />
         </Routes>
       </div>
     </div>
@@ -97,12 +86,12 @@ export default function App() {
       <div className="min-h-screen bg-background">
         <header className="border-b bg-white px-8 flex items-center h-14 gap-3">
           <NavLink to="/" className="flex items-center gap-2.5 font-semibold text-[15px] tracking-tight text-foreground">
-            <span className="w-7 h-7 bg-foreground text-background flex items-center justify-center text-xs font-bold">
+            <span className="w-7 h-7 bg-foreground text-background flex items-center justify-center text-xs font-bold rounded-sm">
               KI
             </span>
-            Knowledge Intelligence
+            Knowledge Intelligence Platform
           </NavLink>
-          <span className="ml-2 text-xs text-muted-foreground border px-2 py-0.5">IBM Consulting</span>
+          <span className="ml-2 text-xs text-muted-foreground border px-2 py-0.5 rounded-full">IBM Consulting</span>
         </header>
 
         <Routes>

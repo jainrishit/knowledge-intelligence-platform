@@ -100,9 +100,6 @@ class Document(Base):
     industry = Column(String(200), nullable=True)
     topics = Column(_JSONField, nullable=True, default=list)
     raw_text = Column(Text, nullable=True)
-    # SHA-256 of raw_text — used by the ingestion pipeline for idempotency:
-    # if content_hash matches the stored value, extraction is skipped.
-    content_hash = Column(String(64), nullable=True)
     upload_status = Column(String(20), nullable=False, default="pending")
     error_message = Column(Text, nullable=True)
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
@@ -141,26 +138,11 @@ class Concept(Base):
 
 Index("ix_concepts_workspace_id", Concept.workspace_id)
 Index("ix_concepts_source_document_id", Concept.source_document_id)
-# Case-insensitive name dedup queries during ingestion benefit from this index.
-Index("ix_concepts_name", Concept.name)
 
 
 ALLOWED_RELATIONSHIP_TYPES = {
-    # Structural / architectural
     "depends_on", "requires", "implements", "extends",
-    "is_part_of", "integrates_with", "replaces",
-    # Causal / enabling
-    "enables", "causes", "mitigates", "supports",
-    # Process / workflow
-    "precedes", "triggers", "produces", "consumes",
-    # Regulatory / governance
-    "governs", "complies_with", "regulates",
-    # Stakeholder / business
-    "owned_by", "used_by", "impacts",
-    # Comparison / contrast
-    "contrasts_with", "competes_with",
-    # Generic fallback
-    "related_to",
+    "contrasts_with", "enables", "is_part_of", "related_to",
 }
 
 
@@ -251,38 +233,6 @@ class Deliverable(Base):
 Index("ix_deliverables_workspace_id", Deliverable.workspace_id)
 
 
-class PresentationPlan(Base):
-    """
-    Stores a Claude-generated presentation plan (blueprint) awaiting user review.
-
-    status: "draft"    — plan generated, awaiting user approval or revision
-            "approved" — user approved; PPTX was generated
-    """
-    __tablename__ = "presentation_plans"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
-    # deliverable type: client_101 | client_201 | executive_summary
-    deliverable_type = Column(String(50), nullable=False)
-    focus_area = Column(String(512), nullable=True)
-    # Full blueprint JSON as serialised text
-    blueprint_json = Column(Text, nullable=False, default="{}")
-    # Revision history as a JSON array of {"instruction": str, "timestamp": str}
-    revision_history = Column(_JSONField, nullable=True, default=list)
-    status = Column(String(20), nullable=False, default="draft")
-    # Set when approved and PPTX generated
-    deliverable_id = Column(Integer, ForeignKey("deliverables.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc), nullable=False)
-
-    workspace = relationship("Workspace")
-    deliverable = relationship("Deliverable")
-
-
-Index("ix_presentation_plans_workspace_id", PresentationPlan.workspace_id)
-
-
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
@@ -366,101 +316,3 @@ class LLMBudget(Base):
 
 
 Index("ix_llm_budgets_workspace_id", LLMBudget.workspace_id)
-
-
-class IngestionAudit(Base):
-    """
-    Per-document ingestion audit record.
-
-    Created at the start of ingestion and updated at each pipeline stage.
-    Provides the raw metrics needed by the audit service to compute
-    ingestion completeness and extraction coverage scores.
-
-    char_count / chunk_count come from the parser/chunker.
-    page_count is extracted from PDF/PPTX metadata (0 for DOCX/CSV).
-    concepts_extracted / relationships_extracted are set after extraction.
-    status mirrors Document.upload_status for quick filtering.
-    error_detail captures the first 512 chars of any failure message.
-    """
-    __tablename__ = "ingestion_audits"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
-    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, unique=True)
-
-    # Parse-level metrics
-    char_count = Column(Integer, nullable=False, default=0)
-    chunk_count = Column(Integer, nullable=False, default=0)
-    page_count = Column(Integer, nullable=False, default=0)   # from parser metadata; 0 if unknown
-
-    # Extraction metrics
-    concepts_extracted = Column(Integer, nullable=False, default=0)
-    relationships_extracted = Column(Integer, nullable=False, default=0)
-
-    # Status mirrors Document.upload_status
-    status = Column(String(20), nullable=False, default="pending")
-    error_detail = Column(String(512), nullable=True)
-
-    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-
-
-Index("ix_ingestion_audits_workspace_id", IngestionAudit.workspace_id)
-Index("ix_ingestion_audits_document_id", IngestionAudit.document_id)
-
-
-class RetrievalBenchmarkRun(Base):
-    """
-    One execution of the Retrieval Reliability benchmark for a workspace.
-
-    A run generates N benchmark questions drawn from the workspace's own
-    knowledge graph, executes each via the retrieval pipeline, then scores
-    the results along five axes:
-
-      recall_score         — fraction of relevant concepts retrieved
-      precision_score      — fraction of retrieved concepts that are relevant
-      coverage_score       — fraction of workspace concepts surfaced ≥once
-      consistency_score    — std-deviation-based stability across repeated queries
-      evidence_fidelity    — fraction of retrieved answers with traceable source
-
-    certification_status   — "CERTIFIED" | "PROVISIONAL" | "NOT_CERTIFIED"
-    run at the point in time the run was created; stored as UTC iso-string.
-    """
-    __tablename__ = "retrieval_benchmark_runs"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
-
-    # Metadata
-    graph_version = Column(Integer, nullable=False, default=0)
-    questions_generated = Column(Integer, nullable=False, default=0)
-    questions_answered = Column(Integer, nullable=False, default=0)
-
-    # Scores 0–100
-    recall_score          = Column(sa_types.Float, nullable=False, default=0.0)
-    precision_score       = Column(sa_types.Float, nullable=False, default=0.0)
-    coverage_score        = Column(sa_types.Float, nullable=False, default=0.0)
-    consistency_score     = Column(sa_types.Float, nullable=False, default=0.0)
-    evidence_fidelity     = Column(sa_types.Float, nullable=False, default=0.0)
-    retrieval_accuracy    = Column(sa_types.Float, nullable=False, default=0.0)  # composite
-
-    # Certification
-    certification_status = Column(String(20), nullable=False, default="NOT_CERTIFIED")
-    certification_score  = Column(sa_types.Float, nullable=False, default=0.0)  # 0–100 overall
-
-    # Per-question detail stored as JSON array
-    question_results_json = Column(Text, nullable=False, default="[]")
-
-    # Knowledge gap summary stored as JSON array of {"concept": str, "gap_type": str}
-    knowledge_gaps_json = Column(Text, nullable=False, default="[]")
-
-    # Timing
-    started_at  = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-    # "running" | "complete" | "failed"
-    status = Column(String(20), nullable=False, default="running")
-    error_detail = Column(String(512), nullable=True)
-
-
-Index("ix_retrieval_benchmark_runs_workspace_id", RetrievalBenchmarkRun.workspace_id)
-Index("ix_retrieval_benchmark_runs_started_at",   RetrievalBenchmarkRun.started_at)

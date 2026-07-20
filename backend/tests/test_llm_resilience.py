@@ -236,7 +236,7 @@ class TestTimeoutConfiguration:
         created_timeouts: list[httpx.Timeout] = []
 
         class FakeAnthropic:
-            def __init__(self, api_key, base_url, timeout, **kwargs):
+            def __init__(self, api_key, base_url, timeout):
                 created_timeouts.append(timeout)
 
         with patch("app.llm_client.anthropic.Anthropic", FakeAnthropic):
@@ -306,8 +306,7 @@ class TestChatFunction:
     def test_exhausted_retries_raise_http_503(self, monkeypatch):
         """
         When all retries are consumed, chat() must raise HTTP 503 — not a
-        raw RetryError or SDK exception — AND surface the real underlying cause
-        (here a timeout) instead of a generic "retry attempts" message.
+        raw RetryError or SDK exception.
         """
         monkeypatch.setattr("app.llm.retry.settings.llm_max_retries", 1)
         monkeypatch.setattr("app.llm.retry.settings.llm_retry_max_wait", 0.0)
@@ -318,24 +317,7 @@ class TestChatFunction:
                 with pytest.raises(HTTPException) as exc_info:
                     chat(system="sys", user="q", operation="test_exhaustion")
         assert exc_info.value.status_code == 503
-        detail = exc_info.value.detail.lower()
-        assert "provider timeout" in detail        # real cause surfaced to the user
-        assert "try again" in detail
-
-
-    def test_exhausted_retries_surface_provider_status(self, monkeypatch):
-        """A provider 5xx (e.g. 'no available server') must surface as its real
-        status, not a generic retry message."""
-        monkeypatch.setattr("app.llm.retry.settings.llm_max_retries", 1)
-        monkeypatch.setattr("app.llm.retry.settings.llm_retry_max_wait", 0.0)
-        err = _make_status_error(503)
-        with patch("app.llm_client._call_api", side_effect=err):
-            with patch("tenacity.nap.time.sleep", lambda _: None):
-                from app.llm_client import chat
-                with pytest.raises(HTTPException) as exc_info:
-                    chat(system="sys", user="q", operation="test_5xx")
-        assert exc_info.value.status_code == 503
-        assert "provider unavailable (503)" in exc_info.value.detail.lower()
+        assert "retry attempts" in exc_info.value.detail.lower()
 
     def test_auth_error_not_retried(self, monkeypatch):
         """A 401 auth error must propagate immediately without retrying."""
@@ -511,22 +493,17 @@ class TestResilienceSettings:
         assert settings.llm_connect_timeout == 10.0
 
     def test_default_read_timeout(self):
-        # Raised 240s → 360s: reliability headroom for slow gateway periods (normal
-        # Client 201 generation ~134s, well under the cap).
         from app.config import settings
-        assert settings.llm_read_timeout == 360.0
+        assert settings.llm_read_timeout == 120.0
 
     def test_default_write_timeout(self):
         from app.config import settings
         assert settings.llm_write_timeout == 30.0
 
     def test_default_max_retries(self):
-        # Raised 1 → 3 (4 attempts) with escalating backoff: transient 5xx return fast,
-        # so more attempts materially improve recovery from provider blips.
         from app.config import settings
-        assert settings.llm_max_retries == 3
+        assert settings.llm_max_retries == 4
 
     def test_default_retry_max_wait(self):
-        # Raised 8 → 30s: cap on per-attempt exponential backoff (~5s→10s→20s→30s).
         from app.config import settings
         assert settings.llm_retry_max_wait == 30.0
