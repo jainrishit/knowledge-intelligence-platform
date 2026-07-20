@@ -88,7 +88,7 @@ Ask questions in natural language. The assistant retrieves relevant context usin
 Explore compiled knowledge as an interactive node-edge graph. Click any concept to see its definition, verbatim source evidence, connected concepts, and relationship types. Built on React Flow with strength-weighted edges.
 
 ### Deliverable Generation
-Generate client-ready consulting documents (Point of View, Executive Summary, Roadmap) directly from compiled workspace knowledge. Every section cites source documents. Export as Markdown or DOCX.
+Generate client-ready PowerPoint presentations — Client 101, Client 201, and Executive Summary — directly from compiled workspace knowledge. Claude analyses the knowledge graph to author the content; a Python validation layer removes empty and placeholder slides before a python-pptx renderer produces the final `.pptx` file. Every slide cites source documents.
 
 ---
 
@@ -109,6 +109,7 @@ Generate client-ready consulting documents (Point of View, Executive Summary, Ro
 │  PyMuPDF            Concept Agent          NetworkX          │
 │  python-docx        Relationship Agent     builder.py        │
 │  python-pptx        Pattern Agent          traversal.py      │
+│                                            memory_manager.py │
 │                                                              │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │            SQLAlchemy ORM  (DB-agnostic)              │   │
@@ -118,7 +119,7 @@ Generate client-ready consulting documents (Point of View, Executive Summary, Ro
 │                                                              │
 │  Retrieval / QA              LLM (Claude via ICA)            │
 │  qa_service.py               All extraction, Q&A,            │
-│  deliverable_service.py      and deliverable generation      │
+│  deliverable_service.py      and PPTX generation             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -221,11 +222,13 @@ ckip/
 │   │   │   └── pattern_agent.py      # Consulting pattern recognition
 │   │   ├── graph/
 │   │   │   ├── builder.py            # NetworkX graph from SQL (derived layer)
+│   │   │   ├── memory_manager.py     # In-process graph cache (WorkspaceGraphStore)
+│   │   │   ├── store.py              # Thread-safe per-workspace graph store
 │   │   │   └── traversal.py          # Semantic node search + strength-filtered BFS
 │   │   ├── retrieval/
 │   │   │   └── qa_service.py         # Evidence-grounded Q&A pipeline
 │   │   ├── generation/
-│   │   │   └── deliverable_service.py # POV / executive summary / roadmap generation
+│   │   │   └── deliverable_service.py # Blueprint → validate → PPTX generation
 │   │   └── api/
 │   │       ├── workspaces.py
 │   │       ├── documents.py
@@ -235,14 +238,21 @@ ckip/
 │   │       └── admin.py              # LLM usage + budget visibility endpoints
 │   ├── tests/
 │   │   ├── test_api.py               # Integration tests — every route and error path
+│   │   ├── test_document_deletion.py # Document deletion cascade tests
 │   │   ├── test_graph.py             # Graph builder + traversal unit tests
+│   │   ├── test_graph_memory.py      # In-process graph cache + pattern intelligence
 │   │   ├── test_llm_governance.py    # Secrets, budget, circuit breaker, rate limiter
+│   │   ├── test_llm_resilience.py    # Timeout, retry, and backoff strategy tests
 │   │   ├── test_parsers.py           # PDF/DOCX/PPTX extraction tests
 │   │   ├── test_pipeline.py          # Full ingestion pipeline tests
 │   │   ├── test_retrieval_consistency.py # Retrieval determinism and scoring tests
-│   │   ├── test_schemas.py           # Pydantic validation and grounding rule tests
+│   │   ├── test_spreadsheet.py       # Spreadsheet parsing tests
 │   │   ├── test_stress.py            # Concurrency and large-workspace tests
-│   │   └── test_upload_security.py   # File size, magic-byte, and spoofing tests
+│   │   ├── test_upload_security.py   # File size, magic-byte, and spoofing tests
+│   │   └── test_visual_qa.py         # PPTX visual QA detector tests
+│   ├── tools/
+│   │   ├── validate_workspace.py     # CLI tool to inspect a workspace's graph
+│   │   └── visual_qa.py              # PPTX slide geometry and text-fit analyser
 │   ├── .env.example                  # Environment variable template
 │   └── requirements.txt
 ├── frontend/
@@ -252,7 +262,7 @@ ckip/
 │       │   ├── DocumentUpload.tsx    # Drag-and-drop + status polling
 │       │   ├── GraphExplorer.tsx     # React Flow canvas + node side panel
 │       │   ├── AssistantChat.tsx     # Chat UI with source citations
-│       │   └── DeliverableGenerator.tsx # Generate + edit + export
+│       │   └── DeliverableGenerator.tsx # PPTX generation workflow
 │       ├── api/client.ts             # Typed API client (proxied to :8000)
 │       └── types/api.ts              # TypeScript interfaces
 └── docs/
