@@ -162,7 +162,16 @@ export const api = {
     /** Approve the plan and generate the PPTX. Returns blob + metadata. */
     generate: async (
       id: number,
-    ): Promise<{ blob: Blob; filename: string; title: string; sourceCount: number }> => {
+    ): Promise<{
+      blob: Blob;
+      filename: string;
+      title: string;
+      sourceCount: number;
+      slidesRemoved: number;
+      slidesFixed: number;
+      slidesBefore: number;
+      slidesAfter: number;
+    }> => {
       const resp = await fetch(`/presentation-plans/${id}/generate`, { method: 'POST' });
       if (!resp.ok) {
         const detail = await resp.json().catch(() => ({ detail: resp.statusText }));
@@ -176,6 +185,10 @@ export const api = {
         filename: fnMatch?.[1] ?? `presentation.pptx`,
         title: resp.headers.get('X-Deliverable-Title') ?? 'Presentation',
         sourceCount: parseInt(resp.headers.get('X-Source-Count') ?? '0', 10),
+        slidesRemoved: parseInt(resp.headers.get('X-Validation-Removed') ?? '0', 10),
+        slidesFixed: parseInt(resp.headers.get('X-Validation-Fixed') ?? '0', 10),
+        slidesBefore: parseInt(resp.headers.get('X-Slides-Before') ?? '0', 10),
+        slidesAfter: parseInt(resp.headers.get('X-Slides-After') ?? '0', 10),
       };
     },
 

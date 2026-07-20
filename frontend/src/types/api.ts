@@ -153,11 +153,20 @@ export interface RevisionRecord {
   timestamp: string;
 }
 
+export interface GraphCoverage {
+  concepts_available: number;
+  relationships_analyzed: number;
+  patterns_available: number;
+  source_documents: number;
+  concepts_selected: number;
+}
+
 export interface PresentationPlan {
   id: number;
   workspace_id: number;
   deliverable_type: DeliverableType;
   focus_area: string | null;
+  graph_coverage: GraphCoverage | null;
   slides: PlanSlide[];
   governing_messages: string[];
   storyline_summary: string | null;

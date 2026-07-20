@@ -68,3 +68,18 @@ ehthumbs.db
 # ── Misc ──────────────────────────────────────────────────────────────
 *.bak
 *.tmp
+
+# ── Deliverable output (generated PPTX + deck specs — contain workspace data) ──
+backend/deliverables/output/
+backend/deliverables/output/**
+
+# ── Benchmark PPTX files (rendered from real workspace — contain client content) ──
+# Scorecard JSONs and README are safe; rendered PPTX files are not.
+backend/deliverables/benchmarks/*.pptx
+
+# ── IBM IPC PowerPoint template (IBM proprietary asset) ──────────────────
+backend/deliverables/templates/IPC_PPT_Template_2026.pptx
+
+# ── Local dev/validation scripts (not needed by end users) ───────────────
+backend/_live_test.py
+backend/_validate_c201.py

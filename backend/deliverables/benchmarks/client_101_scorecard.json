@@ -1,0 +1,24 @@
+{
+  "deliverable_type": "client_101",
+  "scores": {
+    "consulting": 8.7,
+    "exec_readability": 8.7,
+    "storyline": 8.7,
+    "recommendation": 8.7,
+    "layout": 8.5,
+    "template_fidelity": 10.0
+  },
+  "average": 8.88,
+  "objective_metrics": {
+    "rendered_slides": 17,
+    "content_slides": 11,
+    "leaks": 0,
+    "empty_placeholders": 0,
+    "section_dividers": 3,
+    "label_dividers": 0,
+    "max_consecutive_layout": 2,
+    "pct_insight_titles": 73,
+    "ending_is_action": true,
+    "distinct_layouts": 6
+  }
+}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '@/api/client';
 import type {
-  Deliverable, DeliverableType, PlanSlide, PresentationPlan, Workspace,
+  Deliverable, DeliverableType, GraphCoverage, PlanSlide, PresentationPlan, Workspace,
 } from '@/types/api';
 import {
   AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Clock,
@@ -69,6 +69,13 @@ const LAYOUT_LABELS: Record<string, string> = {
   agenda: 'Agenda',
   sources: 'Sources',
   end_slide: 'End Slide',
+  // Diagram layouts
+  process_diagram: 'Process Diagram',
+  technical_architecture: 'Tech Architecture',
+  timeline: 'Timeline',
+  hierarchy: 'Hierarchy',
+  value_tree: 'Value Tree',
+  raci: 'RACI',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -367,12 +374,43 @@ function SlideCard({
 // PlanIntelligenceSummary — compact bar showing graph coverage across the plan
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PlanIntelligenceSummary({ slides }: { slides: PlanSlide[] }) {
+function PlanIntelligenceSummary(
+  { slides, coverage }: { slides: PlanSlide[]; coverage?: GraphCoverage | null },
+) {
   const contentSlides = slides.filter(
     s => !['section_divider', 'cover', 'sources', 'end_slide', 'agenda'].includes(s.layout)
   );
 
-  // Unique concepts used across all content slides
+  if (contentSlides.length === 0) return null;
+
+  // Prefer deck-level graph coverage from the backend — it reflects the whole
+  // knowledge graph the deck was built from. (Per-slide attribution is stripped
+  // for token efficiency, so aggregating it below would misleadingly show 0.)
+  if (coverage) {
+    const tiles = [
+      { n: coverage.concepts_available, label: 'concepts analyzed' },
+      { n: coverage.relationships_analyzed, label: 'relationships analyzed' },
+      { n: coverage.source_documents, label: 'source documents' },
+      { n: coverage.concepts_selected, label: 'concepts prioritized' },
+    ];
+    return (
+      <div className="border bg-white px-4 py-3 space-y-2.5">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          Knowledge graph coverage
+        </p>
+        <div className="grid grid-cols-4 gap-3 text-center">
+          {tiles.map((t, i) => (
+            <div key={i} className="border px-2 py-2">
+              <p className="text-base font-bold text-foreground tabular-nums">{t.n}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">{t.label}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback (older plans predating graph_coverage): aggregate per-slide fields.
   const allConcepts = new Set<string>();
   const allEvidence = new Set<string>();
   const allRelationships = new Set<string>();
@@ -384,8 +422,6 @@ function PlanIntelligenceSummary({ slides }: { slides: PlanSlide[] }) {
     s.relationships_used?.forEach(r => allRelationships.add(r));
     if (s.key_insights?.length > 0) slidesWithInsights++;
   }
-
-  if (contentSlides.length === 0) return null;
 
   return (
     <div className="border bg-white px-4 py-3 space-y-2.5">
@@ -449,6 +485,11 @@ function PlanReview({
   const [revisionError, setRevisionError] = useState('');
   // Track whether local slide edits are ahead of the server-side blueprint.
   const [slidesDirty, setSlidesDirty] = useState(false);
+  // Add-slide form state
+  const [addingSlide, setAddingSlide] = useState(false);
+  const [newSlideTitle, setNewSlideTitle] = useState('');
+  const [newSlideLayout, setNewSlideLayout] = useState('title_content');
+  const [newSlidePosition, setNewSlidePosition] = useState<'end' | number>('end');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Sync when plan changes from outside (after a revision — server is now the source of truth)
@@ -481,6 +522,45 @@ function PlanReview({
     const next = slides.filter((_, i) => i !== index);
     setSlides(next.map((s, i) => ({ ...s, slide_number: i + 1 })));
     setSlidesDirty(true);
+  };
+
+  const addSlide = () => {
+    if (!newSlideTitle.trim()) return;
+    const newSlide: PlanSlide = {
+      slide_number: 0, // renumbered below
+      title: newSlideTitle.trim(),
+      layout: newSlideLayout,
+      purpose: null,
+      section: null,
+      bullets: [],
+      columns: null,
+      col_heads: null,
+      boxes: null,
+      stats: null,
+      notes: null,
+      visual_recommendation: null,
+      key_insights: [],
+      graph_concepts: [],
+      relationships_used: [],
+      patterns_used: [],
+      evidence: [],
+    };
+    let next: PlanSlide[];
+    if (newSlidePosition === 'end') {
+      next = [...slides, newSlide];
+    } else {
+      next = [
+        ...slides.slice(0, newSlidePosition + 1),
+        newSlide,
+        ...slides.slice(newSlidePosition + 1),
+      ];
+    }
+    setSlides(next.map((s, i) => ({ ...s, slide_number: i + 1 })));
+    setSlidesDirty(true);
+    setNewSlideTitle('');
+    setNewSlideLayout('title_content');
+    setNewSlidePosition('end');
+    setAddingSlide(false);
   };
 
   /**
@@ -572,13 +652,25 @@ function PlanReview({
       </div>
 
       {/* Intelligence coverage summary */}
-      <PlanIntelligenceSummary slides={slides} />
+      <PlanIntelligenceSummary slides={slides} coverage={plan.graph_coverage} />
 
       {/* Slide list */}
       <div>
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Proposed slides — reorder, remove, or send a revision instruction below
-        </p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Proposed slides — reorder, remove, or add slides below
+          </p>
+          {!addingSlide && (
+            <button
+              type="button"
+              disabled={revising || approving}
+              onClick={() => setAddingSlide(true)}
+              className="flex items-center gap-1 text-[11px] px-2.5 py-1 border border-foreground/20 text-muted-foreground hover:border-foreground/50 hover:text-foreground transition-colors disabled:opacity-40"
+            >
+              <span className="text-base leading-none">+</span> Add slide
+            </button>
+          )}
+        </div>
         <div className="space-y-1.5">
           {slides.map((slide, i) => (
             <SlideCard
@@ -592,6 +684,75 @@ function PlanReview({
             />
           ))}
         </div>
+
+        {/* Add slide inline form */}
+        {addingSlide && (
+          <div className="mt-2 border bg-white p-4 space-y-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Add a slide
+            </p>
+            <div className="space-y-2">
+              <div>
+                <label className="block text-[11px] text-muted-foreground mb-1">Slide title</label>
+                <input
+                  autoFocus
+                  className="w-full border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-foreground bg-white"
+                  placeholder="Consulting headline — states the answer, not the topic"
+                  value={newSlideTitle}
+                  onChange={e => setNewSlideTitle(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addSlide(); if (e.key === 'Escape') setAddingSlide(false); }}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-muted-foreground mb-1">Layout</label>
+                  <select
+                    className="w-full border px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-foreground"
+                    value={newSlideLayout}
+                    onChange={e => setNewSlideLayout(e.target.value)}
+                  >
+                    {Object.entries(LAYOUT_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] text-muted-foreground mb-1">Insert position</label>
+                  <select
+                    className="w-full border px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-foreground"
+                    value={newSlidePosition === 'end' ? 'end' : String(newSlidePosition)}
+                    onChange={e => setNewSlidePosition(e.target.value === 'end' ? 'end' : Number(e.target.value))}
+                  >
+                    <option value="end">At the end</option>
+                    {slides.map((s, i) => (
+                      <option key={i} value={i}>After slide {i + 1}: {s.title.slice(0, 40)}{s.title.length > 40 ? '…' : ''}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-1 border-t">
+              <button
+                type="button"
+                onClick={addSlide}
+                disabled={!newSlideTitle.trim()}
+                className="px-3 py-1.5 bg-foreground text-background text-xs font-medium disabled:opacity-40 hover:opacity-80 transition-opacity"
+              >
+                Add slide
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAddingSlide(false); setNewSlideTitle(''); }}
+                className="px-3 py-1.5 border text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Cancel
+              </button>
+              <p className="text-[10px] text-muted-foreground ml-2">
+                Use a revision instruction below to let Claude populate the content.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Revision instruction box */}
@@ -888,7 +1049,14 @@ export default function DeliverableGenerator() {
 
   // Step 3: done
   const [downloadReady, setDownloadReady] = useState<{
-    url: string; filename: string; title: string; sourceCount: number;
+    url: string;
+    filename: string;
+    title: string;
+    sourceCount: number;
+    slidesRemoved: number;
+    slidesFixed: number;
+    slidesBefore: number;
+    slidesAfter: number;
   } | null>(null);
 
   // Shared error / loading
@@ -966,7 +1134,16 @@ export default function DeliverableGenerator() {
       const result = await api.plans.generate(plan.id);
       if (downloadReady?.url) URL.revokeObjectURL(downloadReady.url);
       const url = URL.createObjectURL(result.blob);
-      setDownloadReady({ url, filename: result.filename, title: result.title, sourceCount: result.sourceCount });
+      setDownloadReady({
+        url,
+        filename: result.filename,
+        title: result.title,
+        sourceCount: result.sourceCount,
+        slidesRemoved: result.slidesRemoved,
+        slidesFixed: result.slidesFixed,
+        slidesBefore: result.slidesBefore,
+        slidesAfter: result.slidesAfter,
+      });
       setStage('done');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'PPTX generation failed.');
@@ -1172,12 +1349,30 @@ export default function DeliverableGenerator() {
                     Download .pptx
                   </a>
                 </div>
-                <div className="text-[11px] text-muted-foreground pt-3 border-t flex items-start gap-2">
-                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-amber-500" />
-                  <span>
-                    Generated from your approved plan. Review all content before sharing with clients.
-                    Sources are consolidated in the final slide of the deck.
-                  </span>
+                <div className="text-[11px] text-muted-foreground pt-3 border-t space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-amber-500" />
+                    <span>
+                      Generated from your approved plan. Review all content before sharing with clients.
+                      Sources are consolidated in the final slide of the deck.
+                    </span>
+                  </div>
+                  {(downloadReady.slidesRemoved > 0 || downloadReady.slidesFixed > 0) && (
+                    <div className="flex items-start gap-2 bg-foreground/[0.03] border px-3 py-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-foreground/60" />
+                      <span>
+                        Validation layer ran before render:
+                        {downloadReady.slidesRemoved > 0 && (
+                          <> {downloadReady.slidesRemoved} empty or placeholder slide{downloadReady.slidesRemoved !== 1 ? 's' : ''} removed</>
+                        )}
+                        {downloadReady.slidesRemoved > 0 && downloadReady.slidesFixed > 0 && ', '}
+                        {downloadReady.slidesFixed > 0 && (
+                          <> {downloadReady.slidesFixed} slide{downloadReady.slidesFixed !== 1 ? 's' : ''} fixed for template compliance</>
+                        )}
+                        . Final deck: {downloadReady.slidesAfter} slide{downloadReady.slidesAfter !== 1 ? 's' : ''}.
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex justify-start">

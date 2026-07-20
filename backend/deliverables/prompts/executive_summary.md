@@ -172,6 +172,22 @@ For every section decide four things: **objective** (the one question it answers
 - **Fresh-eyes visual review:** render to images and inspect every page as if new; fix real issues.
 - **Handoff hygiene:** editable file in the template's format; appendix separated; Open-items list attached.
 
+## SPEAKER-NOTE PROHIBITION
+
+**NEVER generate presenter coaching in any field.**
+
+The following phrases must never appear anywhere in slide content:
+- "This slide establishes..." / "This slide shows..." / "This slide provides..."
+- "If the audience asks..." / "Use this slide to..." / "The presenter should..."
+
+Slide content must be boardroom-ready — written for the audience, not the presenter.
+
+## TWO-STAGE GENERATION (MANDATORY)
+
+Stage 1 — Extract facts from the knowledge graph: Read the Graph Intelligence Brief. Identify key concepts, relationships, patterns, and evidence. Note what the graph ACTUALLY says.
+
+Stage 2 — Transform into consulting-quality communication: Rewrite every graph fact as executive-level language. The graph provides raw intelligence. You provide consulting-quality communication. Do NOT paste concept names directly onto slides. Transform them into complete, executive-level statements. The final content must be boardroom-ready.
+
 ## OUTPUT FORMAT
 
 Return a JSON object with the following structure:
@@ -181,22 +197,18 @@ Return a JSON object with the following structure:
   "deliverable_type": "executive_summary",
   "title": "Executive Summary: [Specific Focus Area or Primary Theme — not generic]",
   "focus_area": "[the focus area provided, or the primary theme derived from the graph]",
-  "governing_messages": ["Insight 1.", "Insight 2.", "Insight 3."],
+  "governing_messages": ["Consulting insight 1.", "Consulting insight 2.", "Consulting insight 3."],
   "storyline_summary": "2–3 sentence arc: bottom line → evidence → implication → ask.",
   "slides": [
     {
       "slide_number": 1,
-      "section": "Section name",
-      "purpose": "One sentence: what this slide communicates.",
-      "title": "TAKEAWAY — states the conclusion, never a category label",
+      "title": "CONSULTING HEADLINE — states the answer, never a category label",
       "layout": "title_content",
       "bullets": ["Complete grammatical sentence ending with a period.", "Another complete sentence."],
       "col_heads": ["Left", "Right"],
       "columns": [["bullet"], ["bullet"]],
-      "boxes": ["Concise box text.", "Concise box text."],
-      "stats": [{"label": "METRIC", "body": "Supporting context sentence."}],
-      "notes": "Speaker notes — what the presenter should say beyond the bullets.",
-      "sources": ["Document Name"]
+      "boxes": ["Concise complete statement.", "Concise complete statement."],
+      "stats": [{"label": "METRIC", "body": "Supporting context sentence."}]
     }
   ],
   "metadata": {
@@ -209,14 +221,29 @@ Return a JSON object with the following structure:
 }
 ```
 
+**Do NOT include** `"notes"`, `"purpose"`, `"section"`, `"visual_recommendation"`, `"key_insights"`, `"graph_concepts"`, `"relationships_used"`, `"patterns_used"`, or `"evidence"` fields — these waste output tokens.
+
 ### Layout reference — use the best layout for each content type:
+
+**Diagram layouts (IPC template — available layouts):**
 
 | Layout key | Use when | Required fields |
 |---|---|---|
-| `title_content` | Narrative slide with supporting bullets | `bullets` |
+| `process_diagram` | Step-by-step process with 3–7 stages | `steps`: `[{"heading":"Step","body":"Description."}]` |
+| `hierarchy` | Capability or organisational decomposition | `bullets` (3–5 key points for the left narrative panel) |
+
+> **DO NOT USE** `technical_architecture`, `timeline`, `value_tree`, or `raci`.
+> These template diagrams contain fixed illustrations that cannot be populated with workspace content.
+> Use text/box layouts instead: architecture → `four_boxes_wide`; roadmap → `process_diagram`; value breakdown → `six_boxes`; RACI → `two_col_dividers`.
+
+**Text layouts:**
+
+| Layout key | Use when | Required fields |
+|---|---|---|
+| `title_content` | Narrative slide with supporting bullets | `bullets` (3–7 items) |
 | `section_divider` | Opens every major section (no body) | — |
 | `large_text` | The deck's single most important insight — full-slide statement | `title` is the statement |
-| `callout_stat` | Key metric or KPI lines | `bullets` |
+| `callout_stat` | 2–3 key metric or KPI lines | `bullets` |
 | `data_2_callouts` | Two headline metrics with supporting context | `stats`: `[{"label":"VALUE","body":"context"}]` |
 | `two_column` | Many parallel items split evenly left/right | `bullets` (flat list) |
 | `two_col_dividers` | Current State / Target State or any comparison | `col_heads`, `columns` |
@@ -264,6 +291,12 @@ The length and number of bullets should be determined by the slide's purpose, th
 
 Prefer structured layouts over plain bullet slides wherever the content permits. Select the layout that best matches the nature of the content:
 
+- Step-by-step process or workflow (3–7 steps) → `process_diagram`
+- Capability decomposition or organisational hierarchy → `hierarchy`
+- System or technology architecture → `four_boxes_wide` or `four_column` (name the components)
+- Roadmap or phased plan → `process_diagram` (as sequential stages)
+- Value decomposition or benefit breakdown → `six_boxes` or `four_boxes_wide`
+- Governance or accountability structure → `two_col_dividers`
 - Findings or priorities that cluster into four groups → `four_boxes_wide` or `four_boxes_stacked`
 - Five or six themes or evidence points → `six_boxes`
 - A comparison, recommendation vs. alternative, current/target, or gap analysis → `two_col_dividers`

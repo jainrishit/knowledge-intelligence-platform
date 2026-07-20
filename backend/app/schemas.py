@@ -208,6 +208,17 @@ class PresentationPlanCreate(BaseModel):
     focus_area: Optional[str] = None
 
 
+class GraphCoverage(BaseModel):
+    """Deck-level knowledge-graph coverage — shown so the UI communicates that the
+    graph is actively used (the plan strips per-slide attribution for token
+    efficiency, which previously made the UI display 0)."""
+    concepts_available: int = 0
+    relationships_analyzed: int = 0
+    patterns_available: int = 0
+    source_documents: int = 0
+    concepts_selected: int = 0
+
+
 class PresentationPlanOut(BaseModel):
     """Serialised plan returned to the frontend."""
     model_config = ConfigDict(from_attributes=True)
@@ -216,6 +227,8 @@ class PresentationPlanOut(BaseModel):
     workspace_id: int
     deliverable_type: str
     focus_area: Optional[str]
+    # Deck-level graph coverage (None for older plans generated before this field)
+    graph_coverage: Optional[GraphCoverage] = None
     # Parsed slide list for the frontend
     slides: list[PlanSlide] = Field(default_factory=list)
     # Governing messages / storyline from the blueprint
@@ -264,9 +277,19 @@ class DeliverableOut(BaseModel):
     created_at: datetime
 
 
+class ValidationSummary(BaseModel):
+    """Stats from the deterministic validation layer that runs before PPTX render."""
+    slides_removed: int = 0
+    slides_fixed: int = 0
+    slide_count_before: int = 0
+    slide_count_after: int = 0
+
+
 class DeliverablePptxResponse(SourcedResponseMixin):
     deliverable: DeliverableOut
     sources: list[SourceRef] = Field(default_factory=list)
     # Raw PPTX bytes — not serialised to JSON; consumed directly by the API layer
     pptx_bytes: bytes = Field(default=b"", exclude=True)
     filename: str = ""
+    # Validation layer outcome — exposed as response headers for transparency
+    validation: ValidationSummary = Field(default_factory=ValidationSummary)

@@ -78,7 +78,7 @@ def llm_retry():
         retry=retry_if_exception(_is_transient),
         stop=stop_after_attempt(settings.llm_max_retries + 1),   # +1 = original attempt
         wait=wait_exponential_jitter(
-            initial=1.0,
+            initial=5.0,   # meaningful backoff between retries (~5s→10s→20s, capped by max)
             max=settings.llm_retry_max_wait,
             jitter=1.0,
         ),

@@ -67,20 +67,23 @@ class Settings(BaseSettings):
     llm_cost_per_1k_output_tokens: float = Field(default=0.015, alias="LLM_COST_PER_1K_OUTPUT_TOKENS")
 
     # LLM resilience — timeouts (seconds)
-    # read_timeout raised to 180s: a blueprint generation at max_tokens=8192 observed
-    # 118.7s latency from the IBM Gateway.  120s left only 1.3s of margin.
-    # 180s provides a 60s safety buffer while still guaranteeing a timeout eventually.
+    # read_timeout raised to 360s: normal generation is well under 240s (Client 201
+    # ~134s typical), so 360s is headroom for unusually slow gateway periods and any
+    # future prompt growth — a low-risk reliability buffer, not a speed change.
+    # NOTE: transient 5xx ("no available server") return immediately, so this timeout
+    # only bites on genuinely slow responses, not on the provider-availability errors
+    # that cause most failures.
     llm_connect_timeout: float = Field(default=10.0, alias="LLM_CONNECT_TIMEOUT")
-    llm_read_timeout: float = Field(default=180.0, alias="LLM_READ_TIMEOUT")
+    llm_read_timeout: float = Field(default=360.0, alias="LLM_READ_TIMEOUT")
     llm_write_timeout: float = Field(default=30.0, alias="LLM_WRITE_TIMEOUT")
 
     # LLM resilience — retry strategy
-    # max_retries=1: one retry after the initial attempt (2 total attempts).
-    # Rationale: read_timeout=180s means max_retries=2 produces a 3×180=540s worst case.
-    # With max_retries=1: worst case = 2×180s + ~5s backoff = ~365s (~6 min).
-    # One retry is enough to recover from a transient 502; more retries just extend the hang.
-    llm_max_retries: int = Field(default=1, alias="LLM_MAX_RETRIES")
-    llm_retry_max_wait: float = Field(default=8.0, alias="LLM_RETRY_MAX_WAIT")
+    # max_retries=3 (4 attempts total) with escalating backoff (~5s→10s→20s, capped 30s).
+    # Transient 5xx return fast, so a 4-attempt 5xx sequence costs ~backoff (~65s), not
+    # 4×360s — the full-timeout worst case only occurs if every attempt genuinely hangs,
+    # which the circuit breaker then trips to fast-fail subsequent requests.
+    llm_max_retries: int = Field(default=3, alias="LLM_MAX_RETRIES")
+    llm_retry_max_wait: float = Field(default=30.0, alias="LLM_RETRY_MAX_WAIT")
 
     # Server
     cors_origins: str = Field(

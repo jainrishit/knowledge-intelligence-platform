@@ -1,0 +1,24 @@
+{
+  "deliverable_type": "executive_summary",
+  "scores": {
+    "consulting": 9.0,
+    "exec_readability": 9.0,
+    "storyline": 9.0,
+    "recommendation": 9.0,
+    "layout": 9.0,
+    "template_fidelity": 10.0
+  },
+  "average": 9.17,
+  "objective_metrics": {
+    "rendered_slides": 12,
+    "content_slides": 7,
+    "leaks": 0,
+    "empty_placeholders": 0,
+    "section_dividers": 2,
+    "label_dividers": 0,
+    "max_consecutive_layout": 2,
+    "pct_insight_titles": 71,
+    "ending_is_action": true,
+    "distinct_layouts": 6
+  }
+}

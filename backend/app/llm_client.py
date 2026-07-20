@@ -10,7 +10,7 @@ Wraps the Anthropic SDK with:
 
 Timeout defaults (all configurable via environment):
   LLM_CONNECT_TIMEOUT   10 s   TCP handshake + TLS
-  LLM_READ_TIMEOUT     120 s   time waiting for the first response byte
+  LLM_READ_TIMEOUT     240 s   time waiting for the first response byte
   LLM_WRITE_TIMEOUT     30 s   time uploading the request body
 
 Retry defaults:
@@ -86,6 +86,23 @@ def _call_api_proxy(system: str, user: str, max_tokens: int, temperature: float)
     return _call_api(system, user, max_tokens, temperature)
 
 
+def _failure_reason(cause: BaseException | None) -> str:
+    """Human-readable reason for a surfaced LLM failure (429 / timeout / 5xx / …)."""
+    if isinstance(cause, anthropic.APIStatusError):
+        return {
+            429: "provider rate limit (429)",
+            500: "provider error (500)",
+            502: "provider bad gateway (502)",
+            503: "provider unavailable (503)",
+            504: "provider gateway timeout (504)",
+        }.get(getattr(cause, "status_code", None), f"provider error ({getattr(cause, 'status_code', '5xx')})")
+    if isinstance(cause, httpx.TimeoutException):
+        return "provider timeout"
+    if isinstance(cause, (httpx.ConnectError, httpx.RemoteProtocolError)):
+        return "provider connection error"
+    return type(cause).__name__ if cause else "unknown error"
+
+
 def _get_retried_call():
     """
     Return a Tenacity-wrapped _call_api_proxy for the current retry settings.
@@ -154,9 +171,12 @@ def chat(
             message = retried_call(system, user, max_tokens, temperature)
 
         except RetryError as exc:
-            # All attempts exhausted — unwrap and log the root cause.
+            # All attempts exhausted — unwrap, log, and SURFACE the real root cause
+            # (provider 5xx / rate-limit / timeout) instead of a generic message, so
+            # operators and users can tell what actually failed.
             cause = exc.last_attempt.exception()
             retry_count = exc.last_attempt.attempt_number - 1
+            reason = _failure_reason(cause)
             logger.error(
                 "[req=%s op=%s] LLM call failed after %d retries. "
                 "Final error: %s %s",
@@ -165,7 +185,8 @@ def chat(
             )
             raise HTTPException(
                 status_code=503,
-                detail="LLM request failed after multiple retry attempts. Please try again shortly.",
+                detail=f"Generation failed: {reason} (after {retry_count + 1} attempts). "
+                       "This is a temporary provider issue — please try again shortly.",
             ) from exc
 
         except Exception:

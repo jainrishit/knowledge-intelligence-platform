@@ -1,0 +1,141 @@
+{
+  "deliverable_type": "executive_summary",
+  "title": "Digital Assets Platform: The $18.9 Trillion Opportunity for Commercial Banks",
+  "focus_area": "Digital Assets Platform opportunity for commercial banks",
+  "slides": [
+    {
+      "slide_number": 1,
+      "title": "Digital Assets Platform: The $18.9 Trillion Opportunity for Commercial Banks",
+      "layout": "cover"
+    },
+    {
+      "slide_number": 2,
+      "title": "Tokenization will unlock $18.9 trillion in real-world assets by 2033, creating the largest capital markets transformation in a generation",
+      "layout": "section_divider"
+    },
+    {
+      "slide_number": 3,
+      "title": "Tokenization will unlock $18.9 trillion in real-world assets by 2033, creating the largest capital markets transformation in a generation",
+      "layout": "four_boxes_wide",
+      "boxes": [
+        "Bonds, funds, loans, and real estate are being converted into digital tokens that trade 24/7 with instant settlement.",
+        "The tokenized asset market will reach $18.9 trillion by 2033, driven by liquidity improvements and post-trade cost reduction.",
+        "Banks that control custody and settlement infrastructure will capture platform economics; those that do not will become order-takers.",
+        "IBM Digital Asset Haven provides unified custody and routing across 42+ blockchain networks, eliminating the need for banks to build point solutions."
+      ]
+    },
+    {
+      "slide_number": 4,
+      "title": "Stablecoin transaction volumes already rival traditional payment rails, with market capitalization projected to reach $1.9 trillion by 2030",
+      "layout": "data_2_callouts",
+      "stats": [
+        {
+          "label": "$1.9 TRILLION",
+          "body": "Projected stablecoin market capitalization by 2030, requiring banks to provide custody, treasury integration, and reserve management."
+        },
+        {
+          "label": "PAYMENT RAIL PARITY",
+          "body": "Stablecoin transaction volumes now rival traditional payment systems, forcing banks to integrate digital settlement or lose payment flow."
+        }
+      ]
+    },
+    {
+      "slide_number": 5,
+      "title": "Banks must establish three core capabilities to own the digital asset platform layer rather than become service providers to non-bank competitors",
+      "layout": "section_divider"
+    },
+    {
+      "slide_number": 6,
+      "title": "Banks must establish three core capabilities to own the digital asset platform layer rather than become service providers to non-bank competitors",
+      "layout": "three_column",
+      "col_heads": [
+        "Institutional Custody",
+        "Treasury Integration",
+        "Regulatory Compliance"
+      ],
+      "columns": [
+        [
+          "Secure storage and governance of digital assets across multiple blockchain networks.",
+          "IBM Digital Asset Haven provides custody across 42+ blockchains with mainframe-grade security.",
+          "Banks without custody infrastructure will outsource to non-bank providers and lose platform control."
+        ],
+        [
+          "Unified management of fiat and digital assets within existing treasury operations.",
+          "Corporate clients require seamless movement between traditional and digital asset positions.",
+          "Treasury integration determines whether banks retain deposit relationships or lose them to digital-native platforms."
+        ],
+        [
+          "Compliance with evolving stablecoin reserve rules, custody mandates, and cross-border regulations.",
+          "IBM Promontory provides regulatory readiness guidance from former regulators on custody and stablecoin frameworks.",
+          "Regulatory approval timelines are the critical path for market entry."
+        ]
+      ]
+    },
+    {
+      "slide_number": 7,
+      "title": "Cross-border payment modernization eliminates pre-funded capital requirements and reduces settlement time from days to seconds",
+      "layout": "title_content",
+      "bullets": [
+        "Traditional correspondent banking traps billions of dollars in pre-funded accounts across global payment corridors.",
+        "Blockchain-based settlement using stablecoins or bridge currencies enables atomic settlement without pre-funding.",
+        "Financial institutions can redeploy trapped capital while offering clients real-time cross-border payment confirmation.",
+        "IBM infrastructure supports integration of blockchain payment rails with existing core banking systems."
+      ]
+    },
+    {
+      "slide_number": 8,
+      "title": "Central banks representing 98% of global GDP are piloting digital currencies, requiring banks to integrate new settlement infrastructure",
+      "layout": "title_content",
+      "bullets": [
+        "Central Bank Digital Currencies will require tighter integration with central bank settlement systems than traditional payment rails.",
+        "Infrastructure capable of handling national-scale transaction volumes requires mainframe-grade security and operational resilience.",
+        "IBM mainframe platforms provide the operational backbone for CBDC integration with proven capacity exceeding 100,000 transactions per second.",
+        "Early movers will shape CBDC design standards; late entrants will implement specifications defined by competitors."
+      ]
+    },
+    {
+      "slide_number": 9,
+      "title": "Three execution risks will determine whether banks capture platform economics or become commoditized service providers",
+      "layout": "four_boxes_stacked",
+      "boxes": [
+        "Regulatory approval timelines remain the critical path, with final licensing decisions still pending in major jurisdictions.",
+        "Automated customer identity and compliance workflows are required to reduce KYC refresh cycles from 10 days to hours.",
+        "Legacy core banking systems lack native integration points for digital asset custody and settlement infrastructure.",
+        "Security assessment and governance controls require specialized expertise beyond traditional IT security practices."
+      ]
+    },
+    {
+      "slide_number": 10,
+      "title": "Banks should establish digital asset custody and regulatory compliance infrastructure within the next 12 months to secure platform positioning before mandates lock in",
+      "layout": "title_content",
+      "bullets": [
+        "Deploy institutional-grade custody infrastructure using IBM Digital Asset Haven to support tokenization and stablecoin programs across 42+ blockchain networks.",
+        "Engage IBM Promontory to interpret evolving stablecoin reserve rules and custody mandates for regulatory readiness before final approvals.",
+        "Integrate digital asset treasury capabilities with existing core banking systems to retain deposit relationships as clients adopt digital settlement.",
+        "Pilot cross-border payment modernization using blockchain-based settlement to eliminate pre-funded capital requirements in high-volume corridors.",
+        "Establish security assessment and governance controls using specialized digital asset expertise to meet institutional risk standards."
+      ]
+    },
+    {
+      "slide_number": 11,
+      "title": "",
+      "layout": "end_slide"
+    }
+  ],
+  "metadata": {
+    "total_slides": 11,
+    "source_documents": [
+      "What is the market opportunity for Commercial Banks to leverage a Digital Assets Platform and how does IBM Consulting play a role in this space.",
+      "IBM PoV on Digital Assets",
+      "Ripple"
+    ],
+    "open_items": [
+      "Specific regulatory approval timelines by jurisdiction require verification with IBM Promontory.",
+      "Quantified capital efficiency gains from eliminating pre-funded Nostro accounts need client-specific corridor analysis.",
+      "Integration complexity with specific core banking platforms requires technical assessment."
+    ],
+    "generation_notes": "Governing insight: Tokenization and stablecoins are creating an $18.9 trillion market opportunity that will determine whether banks own the digital asset platform layer or become commoditized service providers. Narrative arc: market scale and momentum (slides 3-4) \u2192 strategic capability requirements (slide 6) \u2192 specific use cases for payment modernization and CBDC integration (slides 7-8) \u2192 execution risks (slide 10) \u2192 immediate action to establish custody and regulatory compliance infrastructure (slide 12). Seven content slides deliver a focused leadership briefing on platform positioning, capability requirements, and recommended next action.",
+    "validation_removed": 3,
+    "validation_fixed": 2
+  }
+}

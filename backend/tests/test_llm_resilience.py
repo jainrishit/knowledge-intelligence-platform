@@ -306,7 +306,8 @@ class TestChatFunction:
     def test_exhausted_retries_raise_http_503(self, monkeypatch):
         """
         When all retries are consumed, chat() must raise HTTP 503 — not a
-        raw RetryError or SDK exception.
+        raw RetryError or SDK exception — AND surface the real underlying cause
+        (here a timeout) instead of a generic "retry attempts" message.
         """
         monkeypatch.setattr("app.llm.retry.settings.llm_max_retries", 1)
         monkeypatch.setattr("app.llm.retry.settings.llm_retry_max_wait", 0.0)
@@ -317,7 +318,24 @@ class TestChatFunction:
                 with pytest.raises(HTTPException) as exc_info:
                     chat(system="sys", user="q", operation="test_exhaustion")
         assert exc_info.value.status_code == 503
-        assert "retry attempts" in exc_info.value.detail.lower()
+        detail = exc_info.value.detail.lower()
+        assert "provider timeout" in detail        # real cause surfaced to the user
+        assert "try again" in detail
+
+
+    def test_exhausted_retries_surface_provider_status(self, monkeypatch):
+        """A provider 5xx (e.g. 'no available server') must surface as its real
+        status, not a generic retry message."""
+        monkeypatch.setattr("app.llm.retry.settings.llm_max_retries", 1)
+        monkeypatch.setattr("app.llm.retry.settings.llm_retry_max_wait", 0.0)
+        err = _make_status_error(503)
+        with patch("app.llm_client._call_api", side_effect=err):
+            with patch("tenacity.nap.time.sleep", lambda _: None):
+                from app.llm_client import chat
+                with pytest.raises(HTTPException) as exc_info:
+                    chat(system="sys", user="q", operation="test_5xx")
+        assert exc_info.value.status_code == 503
+        assert "provider unavailable (503)" in exc_info.value.detail.lower()
 
     def test_auth_error_not_retried(self, monkeypatch):
         """A 401 auth error must propagate immediately without retrying."""
@@ -493,22 +511,22 @@ class TestResilienceSettings:
         assert settings.llm_connect_timeout == 10.0
 
     def test_default_read_timeout(self):
-        # Raised from 120s → 180s: blueprint generation observed 118.7s latency from
-        # the IBM Gateway; 120s left only 1.3s margin and risked spurious timeouts.
+        # Raised 240s → 360s: reliability headroom for slow gateway periods (normal
+        # Client 201 generation ~134s, well under the cap).
         from app.config import settings
-        assert settings.llm_read_timeout == 180.0
+        assert settings.llm_read_timeout == 360.0
 
     def test_default_write_timeout(self):
         from app.config import settings
         assert settings.llm_write_timeout == 30.0
 
     def test_default_max_retries(self):
-        # Reduced 4→2→1: each retry = 1 full read_timeout (180s). With max_retries=1,
-        # worst-case wait is 2×180s=360s. With max_retries=2 it was 540s.
+        # Raised 1 → 3 (4 attempts) with escalating backoff: transient 5xx return fast,
+        # so more attempts materially improve recovery from provider blips.
         from app.config import settings
-        assert settings.llm_max_retries == 1
+        assert settings.llm_max_retries == 3
 
     def test_default_retry_max_wait(self):
-        # Reduced 30→8s to limit backoff wait on gateway 502 storms.
+        # Raised 8 → 30s: cap on per-attempt exponential backoff (~5s→10s→20s→30s).
         from app.config import settings
-        assert settings.llm_retry_max_wait == 8.0
+        assert settings.llm_retry_max_wait == 30.0

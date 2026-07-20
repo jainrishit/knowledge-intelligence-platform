@@ -35,7 +35,7 @@ from app.db.models import (
 )
 from app.generation.deliverable_service import (
     DELIVERABLE_TYPES,
-    _BLUEPRINT_SYSTEM_PROMPT,
+    _PLAN_BLUEPRINT_SYSTEM_PROMPT,
     _build_blueprint_message,
     _build_graph_intelligence,
     _blueprint_to_deck_spec,
@@ -48,7 +48,7 @@ from app.graph.memory_manager import graph_memory_manager
 from app.llm_client import chat
 from app.schemas import (
     DeliverablePptxResponse, DeliverableOut, PlanSlide, PlanSlidesUpdate,
-    PresentationPlanOut, SourceRef,
+    PresentationPlanOut, SourceRef, ValidationSummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,13 +59,11 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _REVISION_SYSTEM_PROMPT = """\
-You are a principal management consultant at IBM Consulting acting as a presentation architect.
+You are a principal management consultant at IBM Consulting acting as a consulting writer.
 
-You have been given:
-  1. A presentation blueprint (structured deck plan with slides, titles, and content)
-  2. A user revision instruction
-
-Your task: apply the instruction precisely and return a REVISED blueprint.
+YOUR ROLE: Apply the user's revision instruction and return an updated blueprint.
+YOU generate consulting-quality slide CONTENT.
+YOU DO NOT generate speaker notes, presenter coaching, or annotation metadata.
 
 REVISION RULES:
   - Apply the instruction literally: add, remove, reorder, expand, or reduce as directed.
@@ -77,28 +75,36 @@ REVISION RULES:
   - Preserve the blueprint's JSON schema exactly — same field names, same types.
   - Preserve governing_messages, storyline_summary, deliverable_type, and title unless the
     instruction explicitly asks you to change them.
-  - After applying the revision, run the same quality checks as the original review:
-      • Every slide title must be a takeaway statement (not a label).
+  - After applying the revision, verify quality:
+      • Every slide title must be a consulting headline (insight, not a label).
       • Every bullet must be a complete grammatical sentence ending with a period.
       • No duplicate slides.
       • At least 40% of content slides should use a non-title_content layout.
   - Do NOT add filler slides that lack evidence support.
-  - For every content slide (not section_divider, cover, end_slide), populate ALL five
-   annotation fields so the user can see exactly what graph intelligence supports it:
-     • "key_insights"       — 1–3 consulting insights this slide communicates (complete sentences);
-                              these are the "so what" takeaways the user reviews before approving
-     • "graph_concepts"     — concept names from the graph that this slide uses
-     • "relationships_used" — relationships in "A -> B (type)" format
-     • "patterns_used"      — consulting pattern names (empty list if none apply)
-     • "evidence"           — source document names that back the claims on this slide
-  - Newly added slides must have non-empty key_insights, graph_concepts and evidence lists.
-    If you cannot populate graph_concepts and evidence for a new slide, that slide
-    is ungrounded — do not add it.
+  - Newly added slides must be grounded in the existing blueprint's content or graph evidence.
+    If you cannot write grounded content for a new slide, do not add it.
+
+SPEAKER-NOTE PROHIBITION:
+  The following phrases must NEVER appear in slide titles, bullets, boxes, or columns:
+    ✗ "This slide establishes..."  ✗ "This slide shows..."  ✗ "This slide provides..."
+    ✗ "If the audience asks..."    ✗ "Use this slide to..."  ✗ "The presenter should..."
+  These are speaker notes.  Only generate content intended to appear on the slide itself.
+
+TITLE RULE:
+  Every title must be a consulting headline — it states the answer, not the topic.
+  Bad: "Technology Architecture"   Good: "ISO 20022 reduces cross-border settlement from days to seconds"
+  Bad: "Key Challenges"            Good: "Legacy infrastructure blocks 60% of digital payment initiatives"
+
+DO NOT include annotation fields in the revised blueprint:
+  Do NOT add "notes", "purpose", "section", "visual_recommendation",
+  "key_insights", "graph_concepts", "relationships_used", "patterns_used", or "evidence".
+  These fields waste output tokens and are not needed.
+  If the input blueprint contains these fields, strip them from the revised output.
 
 OUTPUT FORMAT:
 Return a JSON object with this structure:
 {
-  "revised_blueprint": { <complete revised blueprint — same schema as input> },
+  "revised_blueprint": { <complete revised blueprint — same schema as input, without annotation fields> },
   "changes_summary": ["brief description of each change made"]
 }
 
@@ -236,9 +242,6 @@ def _fallback_blueprint(
         "layout": "large_text",
         "title": f"{type_label}: {ws_name}",
         "bullets": [],
-        "key_insights": ["Frame the workspace and its most significant concepts."],
-        "graph_concepts": [c.name for c in concepts[:3]],
-        "evidence": doc_names[:3],
     }]
 
     group: list[Concept] = []
@@ -250,9 +253,6 @@ def _fallback_blueprint(
             "layout": "title_content",
             "title": title,
             "bullets": [_one_sentence(f"{c.name}: {c.description}", c.name) for c in group],
-            "key_insights": ["Summarise workspace concepts and their supporting evidence."],
-            "graph_concepts": [c.name for c in group],
-            "evidence": doc_names[:3],
         })
         group.clear()
 
@@ -312,11 +312,13 @@ def _plan_to_out(plan: PresentationPlan) -> PresentationPlanOut:
                 layout=s.get("layout", "title_content"),
             ))
 
+    coverage = (blueprint.get("metadata") or {}).get("graph_coverage")
     return PresentationPlanOut(
         id=plan.id,
         workspace_id=plan.workspace_id,
         deliverable_type=plan.deliverable_type,
         focus_area=plan.focus_area,
+        graph_coverage=coverage,
         slides=slides,
         governing_messages=blueprint.get("governing_messages") or [],
         storyline_summary=blueprint.get("storyline_summary"),
@@ -390,7 +392,7 @@ def generate_plan(
     # ── Step 4: Graph intelligence brief ─────────────────────────────────────
     _t = time.perf_counter()
     graph_digest, source_refs, concept_ids, doc_ids = _build_graph_intelligence(
-        G, db, workspace_id, relevant_node_ids, effective_focus
+        G, db, workspace_id, relevant_node_ids, effective_focus, deliverable_type
     )
     logger.info("[plan ws=%d] step=graph_intelligence  brief_chars=%d concepts=%d docs=%d  elapsed=%.0fms",
                 workspace_id, len(graph_digest), len(concept_ids), len(doc_ids),
@@ -423,18 +425,20 @@ def generate_plan(
         pattern_count=pattern_count,
         relationship_count=relationship_count,
     )
-    total_prompt_chars = len(blueprint_message) + len(_BLUEPRINT_SYSTEM_PROMPT)
+    total_prompt_chars = len(blueprint_message) + len(_PLAN_BLUEPRINT_SYSTEM_PROMPT)
     logger.info("[plan ws=%d] step=build_prompt  user_chars=%d system_chars=%d total_chars=%d (~%d tokens)  elapsed=%.0fms",
-                workspace_id, len(blueprint_message), len(_BLUEPRINT_SYSTEM_PROMPT),
+                workspace_id, len(blueprint_message), len(_PLAN_BLUEPRINT_SYSTEM_PROMPT),
                 total_prompt_chars, total_prompt_chars // 4,
                 (time.perf_counter() - _t) * 1000)
 
     # ── Step 7: Claude call (Phase 1 — Blueprint) ─────────────────────────────
-    # max_tokens=16000: live measurements show Client 101/201 blueprints with
-    # full annotation fields reach ~38KB (~10,000 output tokens).  8192 caused
-    # consistent truncation mid-JSON for those types.  16000 provides ~6000
-    # token headroom.  Executive Summary (7-10 slides) stays well under 8192
-    # but benefits from the same headroom.
+    # Uses _PLAN_BLUEPRINT_SYSTEM_PROMPT (not _BLUEPRINT_SYSTEM_PROMPT) so that
+    # annotation fields (purpose, key_insights, graph_concepts, relationships_used,
+    # patterns_used, evidence) are REQUIRED — they power the plan review UI.
+    # max_tokens=24000: plan blueprints with full per-slide annotation fields are
+    # significantly larger than generation blueprints (annotation adds ~3–6 tokens
+    # per field per slide × 6 fields × 20 slides = ~1,500–3,600 extra tokens).
+    # 16000 was marginal for Client 201 with annotations; 24000 provides headroom.
     # ── Steps 7–8: Claude blueprint call + DEFENSIVE JSON parse ───────────────
     # Un-crashable path: extraction, fence-stripping, and truncation repair live
     # inside _parse_json; _generate_json_phase adds ONE corrective "JSON only"
@@ -442,12 +446,12 @@ def generate_plan(
     # deterministic graph-grounded blueprint. A malformed/narrative reply can
     # therefore never surface as an HTTP 500. (An HTTP 503 from chat() — LLM
     # unavailable — still propagates as a clean "try again", not a 500.)
-    logger.info("[plan ws=%d type=%s] step=claude_call  phase=blueprint  max_tokens=16000",
+    logger.info("[plan ws=%d type=%s] step=claude_call  phase=blueprint  max_tokens=24000",
                 workspace_id, deliverable_type)
     _t = time.perf_counter()
     blueprint = _generate_json_phase(
-        _BLUEPRINT_SYSTEM_PROMPT, blueprint_message,
-        phase="plan_blueprint", operation="plan_blueprint", max_tokens=16000,
+        _PLAN_BLUEPRINT_SYSTEM_PROMPT, blueprint_message,
+        phase="plan_blueprint", operation="plan_blueprint", max_tokens=24000,
     )
     _claude_elapsed = time.perf_counter() - _t
     # 0-slide guard: a None reply OR a parseable-but-empty reply ({}, a missing
@@ -466,6 +470,21 @@ def generate_plan(
     slide_count = len(blueprint.get("slides", []))
     logger.info("[plan ws=%d] step=claude_call+parse DONE  slides=%d  elapsed=%.1fs",
                 workspace_id, slide_count, _claude_elapsed)
+
+    # ── Deck-level graph coverage (so the UI shows the graph IS being used) ───
+    concepts_available = db.query(Concept).filter(
+        Concept.workspace_id == workspace_id
+    ).count()
+    docs_available = db.query(Document).filter(
+        Document.workspace_id == workspace_id
+    ).count()
+    blueprint.setdefault("metadata", {})["graph_coverage"] = {
+        "concepts_available": concepts_available,
+        "relationships_analyzed": relationship_count,
+        "patterns_available": pattern_count,
+        "source_documents": docs_available,
+        "concepts_selected": len(concept_ids),
+    }
 
     # ── Step 9: Persist plan ──────────────────────────────────────────────────
     _t = time.perf_counter()
@@ -581,9 +600,16 @@ def revise_plan(
     # repair are inside _parse_json). If the model still returns non-JSON, degrade
     # gracefully by keeping the current blueprint unchanged — a revision can safely
     # no-op, so malformed output never produces a 500.
+    #
+    # max_tokens=16000: the revision user message contains the FULL current blueprint
+    # JSON (which can reach ~12,000–15,000 chars / ~3,500–4,000 tokens for a
+    # Client 201 with full annotation fields) plus the revised blueprint must be
+    # returned in full.  8192 tokens left less than 4,000 tokens for the output —
+    # barely enough for a small deck, and guaranteed truncation for Client 201.
+    # 16000 matches the blueprint generation budget and eliminates that risk.
     revision_result = _generate_json_phase(
         _REVISION_SYSTEM_PROMPT, user_message,
-        phase="plan_revision", operation="plan_revision", max_tokens=8192,
+        phase="plan_revision", operation="plan_revision", max_tokens=16000,
     )
     if revision_result is None:
         logger.error(
@@ -657,7 +683,7 @@ def approve_and_generate(
             "Please re-upload documents and generate a new plan."
         )
     _, source_refs, concept_ids, doc_ids = _build_graph_intelligence(
-        G, db, plan.workspace_id, relevant_node_ids, plan.focus_area
+        G, db, plan.workspace_id, relevant_node_ids, plan.focus_area, plan.deliverable_type
     )
 
     # ── Normalise blueprint → deck_spec ──────────────────────────────────────
@@ -675,12 +701,18 @@ def approve_and_generate(
     # ── Validation Layer (deterministic pre-render gate) ──────────────────────
     # Removes any remaining empty/placeholder slides, fixes bullet termination,
     # guards against overflow — no LLM calls.
+    slides_before_validation = len(deck_spec.get("slides", []))
     deck_spec = _validate_deck_spec(
         deck_spec,
         context=f"plan={plan_id} type={plan.deliverable_type}",
     )
+    slides_after_validation = len(deck_spec.get("slides", []))
+    val_meta = (deck_spec.get("metadata") or {})
+    val_removed = val_meta.get("validation_removed", slides_before_validation - slides_after_validation)
+    val_fixed   = val_meta.get("validation_fixed", 0)
     logger.info(
-        "[plan %d] Validation complete: %d slides before render", plan_id, len(deck_spec.get("slides", []))
+        "[plan %d] Validation complete: %d→%d slides before render (removed=%d fixed=%d)",
+        plan_id, slides_before_validation, slides_after_validation, val_removed, val_fixed,
     )
 
     # ── Render PPTX ──────────────────────────────────────────────────────────
@@ -729,4 +761,10 @@ def approve_and_generate(
         sources=source_refs,
         pptx_bytes=pptx_bytes,
         filename=filename,
+        validation=ValidationSummary(
+            slides_removed=val_removed,
+            slides_fixed=val_fixed,
+            slide_count_before=slides_before_validation,
+            slide_count_after=slides_after_validation,
+        ),
     )

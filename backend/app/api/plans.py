@@ -235,6 +235,7 @@ def approve_and_generate_pptx(plan_id: int, db: Session = Depends(get_db)):
             detail="An unexpected error occurred during PPTX generation. Please try again.",
         )
 
+    v = result.validation
     return Response(
         content=result.pptx_bytes,
         media_type=PPTX_MIME,
@@ -242,11 +243,17 @@ def approve_and_generate_pptx(plan_id: int, db: Session = Depends(get_db)):
         headers={
             "Content-Disposition": f'attachment; filename="{result.filename}"',
             "Access-Control-Expose-Headers": (
-                "Content-Disposition, X-Deliverable-Id, X-Deliverable-Title, X-Source-Count"
+                "Content-Disposition, X-Deliverable-Id, X-Deliverable-Title, "
+                "X-Source-Count, X-Validation-Removed, X-Validation-Fixed, "
+                "X-Slides-Before, X-Slides-After"
             ),
             "X-Deliverable-Id": str(result.deliverable.id),
             "X-Deliverable-Title": result.deliverable.title,
             "X-Source-Count": str(len(result.sources)),
+            "X-Validation-Removed": str(v.slides_removed),
+            "X-Validation-Fixed": str(v.slides_fixed),
+            "X-Slides-Before": str(v.slide_count_before),
+            "X-Slides-After": str(v.slide_count_after),
         },
     )
 

@@ -1,0 +1,201 @@
+{
+  "deliverable_type": "client_101",
+  "title": "Payment Modernization: Digital Assets and Real-Time Settlement",
+  "focus_area": "Digital Assets and Payment Infrastructure",
+  "slides": [
+    {
+      "slide_number": 1,
+      "title": "Payment Modernization: Digital Assets and Real-Time Settlement",
+      "layout": "cover"
+    },
+    {
+      "slide_number": 2,
+      "title": "Digital assets eliminate the capital and time penalties of traditional cross-border payments",
+      "layout": "section_divider"
+    },
+    {
+      "slide_number": 3,
+      "title": "Cross-border payments today trap capital in pre-funded accounts and settle in days, not minutes",
+      "layout": "two_col_dividers",
+      "col_heads": [
+        "Traditional correspondent banking",
+        "Digital asset settlement"
+      ],
+      "columns": [
+        [
+          "Banks maintain pre-funded Nostro accounts at destination institutions to enable cross-border payments.",
+          "Correspondent banking chains introduce intermediary fees and multi-day settlement windows.",
+          "Capital tied up in Nostro accounts generates no yield and reduces liquidity available for lending."
+        ],
+        [
+          "Blockchain-based settlement eliminates the need for pre-funded destination accounts entirely.",
+          "Real-time atomic settlement completes transactions in under one minute, operating 24/7.",
+          "Bridge currencies convert fiat-to-fiat instantly without requiring correspondent bank relationships."
+        ]
+      ]
+    },
+    {
+      "slide_number": 4,
+      "title": "Stablecoins are becoming the dominant settlement instrument for digital payments",
+      "layout": "data_2_callouts",
+      "stats": [
+        {
+          "label": "$1.9 trillion",
+          "body": "Projected stablecoin market capitalization by 2030, with transaction volumes already rivaling traditional payment rails."
+        },
+        {
+          "label": "$18.9 trillion",
+          "body": "Global real-world asset tokenization opportunity by 2033, covering bonds, funds, loans, and real estate."
+        }
+      ]
+    },
+    {
+      "slide_number": 5,
+      "title": "Three core capabilities form the foundation of digital asset operations",
+      "layout": "section_divider"
+    },
+    {
+      "slide_number": 6,
+      "title": "Custody, treasury integration, and regulatory compliance determine institutional readiness",
+      "layout": "three_column_headlines",
+      "col_heads": [
+        "Custody",
+        "Treasury",
+        "Compliance"
+      ],
+      "columns": [
+        [
+          "Institutional-grade storage and key management for digital assets including tokens and cryptocurrencies.",
+          "Banks require governance controls and multi-asset vaulting to meet fiduciary standards.",
+          "Security assessments and penetration testing validate wallet resilience before production deployment."
+        ],
+        [
+          "Corporate treasuries need unified visibility across fiat and digital asset positions within existing workflows.",
+          "Blockchain settlement capabilities embed directly into treasury management systems to enable real-time atomic settlement.",
+          "Stablecoin management integrates with traditional cash management processes to reduce reconciliation effort."
+        ],
+        [
+          "Regulatory mandates require full reserve backing with high-quality liquid assets held in segregated accounts.",
+          "Know Your Customer and Anti-Money Laundering workflows must operate across digital identity rails.",
+          "Automated reporting pipelines address evolving requirements including MiCA and GENIUS Act mandates."
+        ]
+      ]
+    },
+    {
+      "slide_number": 7,
+      "title": "Tokenization converts illiquid real-world assets into tradable digital instruments",
+      "layout": "title_content",
+      "bullets": [
+        "Bonds, funds, loans, and real estate can be tokenized on blockchain platforms to unlock liquidity in previously illiquid markets.",
+        "The global tokenization opportunity is projected to reach $18.9 trillion by 2033 as institutions digitize traditional asset classes.",
+        "Post-trade reconciliation effort drops by 40% when settlement occurs on shared ledger infrastructure.",
+        "Banks require unified platforms that support multiple blockchain frameworks.",
+        "Institutional-grade security controls must be maintained across all tokenization workflows."
+      ]
+    },
+    {
+      "slide_number": 8,
+      "title": "Regulated stablecoin issuance requires reserve transparency and jurisdictional compliance",
+      "layout": "title_content",
+      "bullets": [
+        "Payment stablecoins must maintain 1:1 backing with U.S. dollars and short-term Treasuries held in segregated accounts.",
+        "Regulatory frameworks including the GENIUS Act prohibit yield generation on reserves and mandate ongoing supervisory oversight.",
+        "Stablecoins enable price-stable digital settlement while integrating with existing payment rails to reduce friction.",
+        "Financial institutions entering stablecoin markets need advisory guidance from former regulators to navigate evolving compliance requirements."
+      ]
+    },
+    {
+      "slide_number": 9,
+      "title": "Prime brokerage services are extending into digital asset markets",
+      "layout": "four_boxes_wide",
+      "boxes": [
+        "Institutional trading desks require integrated clearing, credit, financing, and cross-margining capabilities for digital assets.",
+        "Cross-margining allows traders to margin on-chain positions against traditional portfolios, improving capital efficiency.",
+        "Vertically integrated prime brokerage platforms combine custody, settlement, and credit facilities in a single offering.",
+        "Banks entering this market need infrastructure that meets institutional standards for governance and risk management."
+      ]
+    },
+    {
+      "slide_number": 10,
+      "title": "Central banks representing 98% of global GDP are exploring digital currencies",
+      "layout": "title_content",
+      "bullets": [
+        "Central Bank Digital Currencies require scalable infrastructure capable of handling national-scale transaction volumes.",
+        "CBDC implementations must maintain institutional-grade security while supporting confidential computing for privacy-sensitive transactions.",
+        "Financial institutions need integration capabilities to connect CBDC infrastructure with existing payment systems.",
+        "Pilot programs are testing design choices around reserve backing and distribution models.",
+        "Interoperability with commercial bank systems remains a key design consideration for CBDC implementations."
+      ]
+    },
+    {
+      "slide_number": 11,
+      "title": "IBM addresses digital asset needs through platform, advisory, and security capabilities",
+      "layout": "section_divider"
+    },
+    {
+      "slide_number": 12,
+      "title": "IBM Digital Asset Haven provides custody and settlement across 42+ blockchain networks",
+      "layout": "four_boxes_wide",
+      "boxes": [
+        "Unified platform for transacting, governing, and settling assets across multiple blockchain frameworks without requiring separate integrations.",
+        "Comprehensive APIs support authentication, wallet management, transaction routing, and governance controls for institutional clients.",
+        "Integration with IBM Z mainframe infrastructure provides the operational backbone with institutional-grade security.",
+        "Platform supports tokenization workflows for real-world assets including bonds, funds, loans, and real estate."
+      ]
+    },
+    {
+      "slide_number": 13,
+      "title": "IBM Promontory delivers regulatory readiness guidance from former regulators",
+      "layout": "title_content",
+      "bullets": [
+        "Advisory service staffed by former regulators provides guidance on crypto-asset custody, stablecoin reserve rules, and supervisory expectations.",
+        "Regulatory readiness assessments address jurisdictional requirements including MiCA, GENIUS Act, and NYDFS oversight mandates.",
+        "Compliance architecture design covers Know Your Customer and Anti-Money Laundering workflows that operate across digital identity rails.",
+        "Automated regulatory reporting pipelines reduce manual refresh cycles from 10 days to 3 hours.",
+        "Compliance processes benefit from continuous monitoring and real-time reporting capabilities."
+      ]
+    },
+    {
+      "slide_number": 14,
+      "title": "IBM X-Force Red provides offensive security testing for digital asset infrastructure",
+      "layout": "title_content",
+      "bullets": [
+        "Ethical hacking services test wallet security, blockchain resilience, and key-management controls before production deployment.",
+        "Digital asset-specific security assessments validate that custody infrastructure meets institutional fiduciary standards.",
+        "Penetration testing identifies vulnerabilities in authentication, transaction routing, and governance control implementations.",
+        "Security validation is a prerequisite for banks entering digital asset markets with custody or stablecoin offerings."
+      ]
+    },
+    {
+      "slide_number": 15,
+      "title": "Financial institutions should prioritise custody governance before expanding into tokenization or stablecoin programs",
+      "layout": "four_boxes_wide",
+      "boxes": [
+        "Establish institutional-grade custody infrastructure with governance controls and multi-asset vaulting as the foundation for all digital asset initiatives.",
+        "Integrate blockchain settlement capabilities into existing treasury management systems to unify fiat and digital asset visibility.",
+        "Engage regulatory advisory services early to navigate jurisdictional requirements and design compliant reserve management architectures.",
+        "Validate security controls through offensive testing before launching client-facing custody or stablecoin services."
+      ]
+    },
+    {
+      "slide_number": 16,
+      "title": "Thank you",
+      "layout": "end_slide"
+    }
+  ],
+  "metadata": {
+    "total_slides": 16,
+    "source_documents": [
+      "What is the market opportunity for Commercial Banks to leverage a Digital Assets Platform and how does IBM Consulting play a role in this space.",
+      "Ripple",
+      "IBM PoV on Digital Assets"
+    ],
+    "open_items": [
+      "Specific client examples or case studies would strengthen the business case for custody and treasury integration",
+      "Competitive positioning relative to other custody and settlement providers would help IBM differentiate its offering"
+    ],
+    "generation_notes": "Deck orients executives to the payment modernization opportunity driven by digital assets, explains the three core capabilities (custody, treasury, compliance) in business terms, and positions IBM's platform, advisory, and security capabilities as addressing the highest-value client needs. Story arc: business context \u2192 operating domains \u2192 IBM role and client next steps. Content slides: 13 (within target range). No technical implementation detail included per Client 101 mandate.",
+    "validation_removed": 1,
+    "validation_fixed": 0
+  }
+}
